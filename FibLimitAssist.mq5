@@ -4,20 +4,36 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.09"
+#property version   "1.13"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
 #property description "· 单笔风险 = 余额固定百分比，盈亏比固定，手数反算并截断"
 #property description "· MKT 按钮两侧实时显示持仓浮盈 + 当日累计盈亏"
 #property description "· EVEN 按钮统一把任意持仓调到入场价平仓（盈改 SL，亏改 TP）"
+#property description "· ADJUST 按钮一键把 1.00/0.00 调整到图表最近的高低点 (v1.13)"
 
 //---------------------------- 输入参数 -----------------------------//
-// 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=2:1, 0.49=1:1, 市价=1:1)
+// 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
 input double InpSL_OffsetPercent = 1.0;        // 止损向外偏移占区间百分比 (%)
 input int    InpLotDecimals      = 2;          // 手数截断保留的小数位 (不四舍五入)
 input long   InpMagicNumber      = 20260903;   // 订单魔术号
 input string InpOrderComment     = "FibLimitAssist"; // 订单注释
+
+// v1.12 新增: 当日盈亏切日时区 (FTMO 用布拉格时间 CE(S)T，其他 broker 可保持 LOCAL)
+enum ENUM_DAY_RESET_TZ
+  {
+   DAY_TZ_LOCAL    = 0,  // 本机时间 00:00 切日 (按 TimeLocal())
+   DAY_TZ_CET_AUTO = 1,  // FTMO 规则: CE(S)T 00:00 切日, 自动判断 DST (推荐 FTMO 用户)
+   DAY_TZ_CET      = 2,  // 强制 CET (GMT+1, 冬令时)
+   DAY_TZ_CEST     = 3,  // 强制 CEST (GMT+2, 夏令时)
+  };
+input ENUM_DAY_RESET_TZ InpDayResetTimezone = DAY_TZ_CET_AUTO; // 日切时区 (默认 FTMO/布拉格时间)
+
+// v1.13 新增: ADJUST 按钮 - 一键将 1.00/0.00 调整到图表上最近的高低点 (移植 zigzag 3 参数分形识别)
+input int InpAdjustDepth     = 12; // [ADJUST] 分形识别窗口 (左右各 N 根 bar, 类比 zigzag ExtDepth)
+input int InpAdjustDeviation = 5;   // [ADJUST] 候选与前一同向极值最小偏差 (单位:点, 类比 zigzag ExtDeviation)
+input int InpAdjustBackstep  = 3;   // [ADJUST] 候选最小时间距离 (单位:bar, 类比 zigzag ExtBackstep, 用于替换紧挨假信号)
 
 //---------------------------- 固定比例 -----------------------------//
 #define RATIO_100 1.00
@@ -62,6 +78,11 @@ double   g_riskValues[3] = {0.5, 1.0, 2.0};  // 可选档位 (循环顺序: 1 �
 
 // HIDE/SHOW 状态 (会话内有效，重启后恢复显示——避免忘记 EA 被隐藏找不到)
 bool     g_hidden = false;     // true=隐藏 EA 线条与按钮(HIDE 按钮自身除外)
+
+// v1.12 新增: 服务器相对 GMT 的偏移小时数 (OnInit 自动探测一次)
+//   由 (TimeCurrent() - TimeGMT()) 推断，如 broker 是 GMT+2 则 g_serverGMTOffset = +2
+//   仅用于 CE(S)T 切日换算
+int      g_serverGMTOffset = 0;
 
 //---------------------------- 工具函数 -----------------------------//
 // 对象命名：按比例生成唯一名称
@@ -215,6 +236,8 @@ string RiskName()          { return g_prefix + "RISK"; }
 string MarketName()        { return g_prefix + "MARKET"; }
 // 隐藏/显示按钮对象名 (始终显示，不会随 g_hidden 隐藏)
 string HideName()          { return g_prefix + "HIDE"; }
+// v1.13: 一键调整 1.00/0.00 到最近高低点的按钮对象名
+string AdjustName()        { return g_prefix + "ADJUST"; }
 
 bool CreateSwapButton()
   {
@@ -231,6 +254,34 @@ bool CreateSwapButton()
    ObjectSetInteger(0, name, OBJPROP_STATE, false);
    ObjectSetString(0, name, OBJPROP_FONT, "Arial");
    ObjectSetString(0, name, OBJPROP_TOOLTIP, "点击对调起点终点，切换多空方向");
+   return true;
+  }
+
+// v1.13: ADJUST 按钮 (一键调整 1.00/0.00 到最近的高低点)
+bool CreateAdjustButton()
+  {
+   string name = AdjustName();
+   if(!ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0)) return false;
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, 80);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, 22);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 7);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'100,100,160');
+   ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, name, OBJPROP_STATE, false);
+   ObjectSetString(0, name, OBJPROP_FONT, "Arial");
+   ObjectSetString(0, name, OBJPROP_TEXT, "ADJUST");
+   ObjectSetString(0, name, OBJPROP_TOOLTIP,
+                   "一键将 1.00/0.00 调整到图表上最近的高低点 (zigzag 3 参数分形识别)\n"
+                   "· 1.00 → 最近的高点 (datetime 距今最近)\n"
+                   "· 0.00 → 最近的低点 (datetime 距今最近)\n"
+                   "· 0.21/0.49/0.79 自动按新 Range 重新计算\n"
+                   "参数: Depth=" + IntegerToString(InpAdjustDepth) +
+                   ", Deviation=" + IntegerToString(InpAdjustDeviation) +
+                   ", Backstep=" + IntegerToString(InpAdjustBackstep));
    return true;
   }
 
@@ -264,10 +315,11 @@ void CreateObjects()
    CreateButton(BName(RATIO_079));
    CreateButton(BName(RATIO_049));
    CreateSwapButton();
-   CreateActionButton(CancelPendingName(), 100, "CANCEL",       C'120,120,120', "取消账户内全部挂单（含手动单）");
-   CreateActionButton(CloseAllName(),      100, "CALL",          C'200,120,20',  "平掉账户内全部持仓（不涉及挂单）");
-   CreateActionButton(CloseHalfName(),     100, "CHALF",         C'230,140,40',  "按手数砍半平仓（账户全部品种）；若砍半后 < 最小手数则全平该仓位");
-   CreateActionButton(EvenName(),           80, "EVEN",          C'60,120,200',  "一键入场价：盈利仓位SL改到入场；亏损仓位TP改到入场（保本平仓）");
+   CreateAdjustButton();   // v1.13: ADJUST 按钮 (位置由 UpdateAdjustButton 跟随 SWAP 设置)
+   CreateActionButton(CancelPendingName(), 100, "CANCEL",       C'120,120,120', "取消当前品种全部挂单（含手动单），不影响其他品种");
+   CreateActionButton(CloseAllName(),      100, "CALL",          C'200,120,20',  "平掉当前品种全部持仓（不涉及挂单），不影响其他品种");
+   CreateActionButton(CloseHalfName(),     100, "CHALF",         C'230,140,40',  "按手数砍半平仓当前品种持仓；若砍半后 < 最小手数则全平该仓位");
+   CreateActionButton(EvenName(),           80, "EVEN",          C'60,120,200',  "一键入场价（仅当前品种）：盈利仓位SL改到入场；亏损仓位TP改到入场（保本平仓）");
    CreateActionButton(RiskName(),           80, "",              C'90,90,90',   "点击循环切换单笔风险档位：0.5% → 1% → 2% → 0.5%");
    CreateActionButton(MarketName(),        110, "MARKET",        C'140,140,140',"市价下单（止损 = 1.00 ± Range×1%，盈亏比 1:1）");
    CreateActionButton(HideName(),           80, "HIDE",          C'60,60,60',   "隐藏/显示 EA 全部线条与按钮（此按钮自身始终显示）");
@@ -349,6 +401,20 @@ void UpdateSwapButton(int dir)
    double topPrice = MathMax(g_p1, g_p0);
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - 80) / 2);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 11);
+  }
+
+// v1.13: ADJUST 按钮位置 (在 SWAP 右侧 4px, 同样在"最上面那根线"中点上方 11px)
+void UpdateAdjustButton()
+  {
+   string name = AdjustName();
+   if(ObjectFind(0, name) < 0) return;
+   int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   int x = 0, y = 0;
+   double topPrice = MathMax(g_p1, g_p0);
+   if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
+   // SWAP 位置 = (w-80)/2, ADJUST 宽 80, 间距 4 → ADJUST 左 X = SWAP 左 X + SWAP 宽 + 4
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - 80) / 2 + 84);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 11);
   }
 
@@ -537,6 +603,7 @@ void RefreshAll()
    UpdateButton(BName(RATIO_049), price49, BuildButtonText(ActualRatio(price49), lot49), dir);
 
    UpdateSwapButton(dir);
+   UpdateAdjustButton();   // v1.13: ADJUST 按钮位置 (跟随 SWAP)
    UpdateMarketButton(dir);
    UpdateRiskButton();
    UpdateHideButton();
@@ -595,13 +662,157 @@ double CalcFloatPnL()
    return total;
   }
 
-// 当日（本地时间 00:00 起）所有 deals 的盈亏合计（含已平仓 + 未平仓）
+//---------------------------- 时区与切日 -----------------------------//
+// v1.12: 用于把 CalcDayPnL 的"今天"起点切换到 FTMO 规则的 CE(S)T
+//        (布拉格时间 00:00 切日)，自动判断夏令时/冬令时
+
+// OnInit 调用一次: 自动探测服务器相对 GMT 的偏移 (小时)
+void DetectTimezone()
+  {
+   g_serverGMTOffset = (int)MathRound((double)(TimeCurrent() - TimeGMT()) / 3600.0);
+   PrintFormat("[FibLimitAssist] 时区探测: ServerGMT=%+d, DayResetMode=%d (%s)",
+               g_serverGMTOffset,
+               (int)InpDayResetTimezone,
+               (InpDayResetTimezone == DAY_TZ_LOCAL) ? "LOCAL" :
+               (InpDayResetTimezone == DAY_TZ_CET_AUTO) ? "CET_AUTO(FTMO)" :
+               (InpDayResetTimezone == DAY_TZ_CET) ? "CET" : "CEST");
+  }
+
+// 工具: 构造"服务器视角下的 yyyy.mm.dd hh:mm:ss"字符串 (供 StringToTime 解析)
+string FmtDateTime(int year, int mon, int day, int hour=0, int min=0, int sec=0)
+  {
+   return IntegerToString(year) + "." +
+          (mon < 10 ? "0" : "") + IntegerToString(mon) + "." +
+          (day < 10 ? "0" : "") + IntegerToString(day) + " " +
+          (hour < 10 ? "0" : "") + IntegerToString(hour) + ":" +
+          (min < 10 ? "0" : "") + IntegerToString(min) + ":" +
+          (sec < 10 ? "0" : "") + IntegerToString(sec);
+  }
+
+// 工具: 找某年某月最后一个周日的"日" (欧洲 DST 切换依据)
+int LastSundayOfMonth(int year, int mon)
+  {
+   int lastDay = 31;
+   if(mon == 4 || mon == 6 || mon == 9 || mon == 11) lastDay = 30;
+   else if(mon == 2)
+     {
+      bool leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+      lastDay = leap ? 29 : 28;
+     }
+   for(int d = lastDay; d > lastDay - 7 && d >= 1; d--)
+     {
+      datetime t = StringToTime(FmtDateTime(year, mon, d, 12, 0, 0));
+      MqlDateTime st;
+      TimeToStruct(t, st);
+      if(st.day_of_week == 0) return d;   // 0 = Sunday
+     }
+   return lastDay;
+  }
+
+// 判断 GMT timestamp 是否在欧洲夏令时 (CEST, GMT+2)
+// 规则: 3 月最后一个周日 01:00 UTC ~ 10 月最后一个周日 01:00 UTC
+// 输入 gmtTime 是真实 Unix UTC timestamp (TimeGMT() 风格)
+bool IsEuropeanDST(datetime gmtTime)
+  {
+   // 把 gmtTime 调整为"本机时区视角下的同一瞬间"，这样 TimeToStruct 拆出的 y/m/d 对应 GMT 视角
+   int localGMTBias = (int)MathRound((double)(TimeLocal() - TimeGMT()) / 3600.0);
+   datetime localView = gmtTime + localGMTBias * 3600;
+   MqlDateTime dt;
+   TimeToStruct(localView, dt);   // dt 字段对应 GMT 视角下的 y/m/d/h/m/s
+   int year  = dt.year;
+   int month = dt.mon;
+   int day   = dt.day;
+
+   // 简单月份判断: 1/2/11/12 → CET; 4-9 → CEST
+   if(month == 1 || month == 2 || month == 11 || month == 12) return false;
+   if(month >= 4 && month <= 9) return true;
+
+   // 3 月 / 10 月: 精确判断
+   int lastSun = LastSundayOfMonth(year, month);
+   // GMT 视角下"周日 01:00 UTC"的 timestamp
+   // 构造服务器视角字符串 (服务器时刻 = GMT + serverGMTBias, 所以要写 GMT 01:00 = server (1+serverGMTBias) 点)
+   // 注意: 假设 serverGMTBias < 23 (FTMO broker 永远成立, 即 < 24)
+   int srvHour = 1 + g_serverGMTOffset;
+   int srvDay  = day;   // 先假设不跨日
+   int srvMon  = month;
+   int srvYear = year;
+   if(srvHour >= 24)
+     {
+      srvHour -= 24;
+      // 日+1, 月可能要进位
+      srvDay++;
+      // 简化: 用 StringToTime 构造"服务器下个月初"再减 1 秒? 这里直接处理跨日边界
+      int monthDays = 31;
+      if(srvMon == 4 || srvMon == 6 || srvMon == 9 || srvMon == 11) monthDays = 30;
+      else if(srvMon == 2)
+        {
+         bool leap = (srvYear % 4 == 0 && srvYear % 100 != 0) || (srvYear % 400 == 0);
+         monthDays = leap ? 29 : 28;
+        }
+      if(srvDay > monthDays) { srvDay = 1; srvMon++; if(srvMon > 12) { srvMon = 1; srvYear++; } }
+     }
+   datetime boundary = StringToTime(FmtDateTime(srvYear, srvMon, srvDay, srvHour, 0, 0));
+   // 服务器视角 timestamp → GMT 视角 timestamp
+   boundary -= g_serverGMTOffset * 3600;
+
+   if(month == 3)  return (gmtTime >= boundary);   // 3 月周日 01:00 GMT 之后是 CEST
+   if(month == 10) return (gmtTime <  boundary);   // 10 月周日 01:00 GMT 之前是 CEST
+   return false;
+  }
+
+// 给定服务器时间戳 srvNow, 返回 "CE(S)T 视角下今天 00:00" 对应的服务器 timestamp
+// cetOffsetHours = 1 (CET) 或 2 (CEST)
+//
+// 推导:
+//   brokerMidnight = broker 视角下"今天 00:00"的 timestamp
+//   CET today 可能 != broker today, 取决于 CET hour 是否越界:
+//     CET hour = broker hour - serverGMTBias + cetOffset
+//     cetHour < 0       → CET today = broker today - 1
+//     0 <= cetHour < 24 → CET today = broker today
+//     cetHour >= 24     → CET today = broker today + 1
+//   result = brokerMidnight + dayDelta*86400 + (serverGMTBias - cetOffset)*3600
+//   datetime 加减是直接长整数运算, 跨日/跨月自动处理
+datetime CESTMidnightServerTime(datetime srvNow, int cetOffsetHours)
+  {
+   MqlDateTime dt;
+   TimeToStruct(srvNow, dt);
+   int cetHour  = dt.hour - g_serverGMTOffset + cetOffsetHours;
+   int dayDelta = 0;
+   if(cetHour < 0)       dayDelta = -1;
+   else if(cetHour >= 24) dayDelta = 1;
+   datetime brokerMidnight = StringToTime(FmtDateTime(dt.year, dt.mon, dt.day, 0, 0, 0));
+   return brokerMidnight + dayDelta * 86400 + (g_serverGMTOffset - cetOffsetHours) * 3600;
+  }
+
+// 按 InpDayResetTimezone 返回"今天 00:00"对应的服务器 timestamp
+datetime DayStartForPnL(datetime srvNow)
+  {
+   switch(InpDayResetTimezone)
+     {
+      case DAY_TZ_LOCAL:
+         return StringToTime(TimeToString(TimeLocal(), TIME_DATE));   // 原行为
+      case DAY_TZ_CET:
+         return CESTMidnightServerTime(srvNow, 1);   // 强制 CET
+      case DAY_TZ_CEST:
+         return CESTMidnightServerTime(srvNow, 2);   // 强制 CEST
+      case DAY_TZ_CET_AUTO:
+      default:
+        {
+           // 自动判断当前是否在欧洲 DST
+           datetime gmtNow = srvNow - g_serverGMTOffset * 3600;
+           int cetOffset = IsEuropeanDST(gmtNow) ? 2 : 1;
+           return CESTMidnightServerTime(srvNow, cetOffset);
+        }
+     }
+  }
+
+// 当日（按 InpDayResetTimezone 决定的 00:00 起）所有 deals 的盈亏合计（含已平仓 + 未平仓）
 // 已平仓：遍历历史 deals，取 profit + swap + commission
 // 未平仓部分由 CalcFloatPnL 叠加，避免重复计算
 double CalcDayPnL()
   {
-   // 本地时间 00:00
-   datetime dayStart = StringToTime(TimeToString(TimeLocal(), TIME_DATE));   // 本地日期 00:00:00
+   // 按 InpDayResetTimezone 决定"今天 00:00"对应的服务器时间戳
+   datetime dayStart = DayStartForPnL(TimeCurrent());
    double closed = 0.0;
 
    // 拉取从 dayStart 到现在的历史
@@ -738,10 +949,10 @@ void PlaceOrderWithRR(double r, double rr)
    SendLimitOrder(dir, entry, sl, tp, lot);
   }
 
-// 0.79 挂单 → 2 倍盈亏比；0.49 挂单 → 1 倍盈亏比
+// 0.79 挂单 → 3 倍盈亏比；0.49 挂单 → 1 倍盈亏比
 void PlaceOrder(double r)
   {
-   double rr = (r == RATIO_079) ? 2.0 : 1.0;
+   double rr = (r == RATIO_079) ? 3.0 : 1.0;
    PlaceOrderWithRR(r, rr);
   }
 
@@ -825,6 +1036,9 @@ void CancelAllPending()
          type != ORDER_TYPE_BUY_STOP_LIMIT && type != ORDER_TYPE_SELL_STOP_LIMIT)
         continue;
 
+      // 仅作用于当前图表品种，不影响其他品种的挂单
+      if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
+
       MqlTradeRequest req;
       MqlTradeResult  res;
       ZeroMemory(req); ZeroMemory(res);
@@ -838,8 +1052,8 @@ void CancelAllPending()
          Print("[FibLimitAssist] 取消挂单失败 ticket=", ticket, " retcode=", res.retcode, " ", res.comment);
         }
      }
-   Print("[FibLimitAssist] 取消挂单完成：成功=", cancelled, " 失败=", failed);
-   Alert("[FibLimitAssist] 取消挂单：成功 ", cancelled, " 张", (failed > 0 ? "，失败 " + IntegerToString(failed) + " 张" : ""));
+   Print("[FibLimitAssist] 当前品种(", _Symbol, ")挂单清除完成：成功=", cancelled, " 失败=", failed);
+   Alert("[FibLimitAssist] 当前品种(", _Symbol, ")挂单清除：成功 ", cancelled, " 张", (failed > 0 ? "，失败 " + IntegerToString(failed) + " 张" : ""));
   }
 
 // 平掉账户内全部持仓（不涉及挂单）
@@ -851,6 +1065,10 @@ void CloseAllPositions()
       ulong ticket = PositionGetTicket(i);
       if(ticket == 0) continue;
       string sym   = PositionGetString(POSITION_SYMBOL);
+
+      // 仅作用于当前图表品种，不影响其他品种的持仓
+      if(sym != _Symbol) continue;
+
       long   ptype = PositionGetInteger(POSITION_TYPE);
       double vol   = PositionGetDouble(POSITION_VOLUME);
 
@@ -883,8 +1101,8 @@ void CloseAllPositions()
          Print("[FibLimitAssist] 平仓失败 ticket=", ticket, " retcode=", res.retcode, " ", res.comment);
         }
      }
-   Print("[FibLimitAssist] 清仓完成：成功=", closed, " 失败=", failed);
-   Alert("[FibLimitAssist] 清仓：成功 ", closed, " 笔", (failed > 0 ? "，失败 " + IntegerToString(failed) + " 笔" : ""));
+   Print("[FibLimitAssist] 当前品种(", _Symbol, ")清仓完成：成功=", closed, " 失败=", failed);
+   Alert("[FibLimitAssist] 当前品种(", _Symbol, ")清仓：成功 ", closed, " 笔", (failed > 0 ? "，失败 " + IntegerToString(failed) + " 笔" : ""));
   }
 
 // 平掉账户全部持仓的 50%（按手数砍半，向下对齐到步长）
@@ -897,6 +1115,10 @@ void CloseHalfPositions()
       ulong ticket = PositionGetTicket(i);
       if(ticket == 0) continue;
       string sym   = PositionGetString(POSITION_SYMBOL);
+
+      // 仅作用于当前图表品种，不影响其他品种的持仓
+      if(sym != _Symbol) continue;
+
       long   ptype = PositionGetInteger(POSITION_TYPE);
       double vol   = PositionGetDouble(POSITION_VOLUME);
       long   magic = PositionGetInteger(POSITION_MAGIC);
@@ -949,8 +1171,8 @@ void CloseHalfPositions()
          Print("[FibLimitAssist] 平一半失败 ticket=", ticket, " retcode=", res.retcode, " ", res.comment);
         }
      }
-   Print("[FibLimitAssist] 平一半完成：半平=", halfClosed, " 全平=", fullClosed, " 失败=", failed);
-   Alert("[FibLimitAssist] 平一半：半平 ", halfClosed, " 笔，全平 ", fullClosed, " 笔",
+   Print("[FibLimitAssist] 当前品种(", _Symbol, ")平一半完成：半平=", halfClosed, " 全平=", fullClosed, " 失败=", failed);
+   Alert("[FibLimitAssist] 当前品种(", _Symbol, ")平一半：半平 ", halfClosed, " 笔，全平 ", fullClosed, " 笔",
          (failed > 0 ? "，失败 " + IntegerToString(failed) + " 笔" : ""));
   }
 
@@ -967,6 +1189,10 @@ void DoEven()
       ulong ticket = PositionGetTicket(i);
       if(ticket == 0) continue;
       string sym    = PositionGetString(POSITION_SYMBOL);
+
+      // 仅作用于当前图表品种，不影响其他品种的持仓
+      if(sym != _Symbol) continue;
+
       long   ptype  = PositionGetInteger(POSITION_TYPE);
       double entry  = PositionGetDouble(POSITION_PRICE_OPEN);
       double curSL  = PositionGetDouble(POSITION_SL);
@@ -1015,9 +1241,210 @@ void DoEven()
          Print("[FibLimitAssist] EVEN 修改失败 ticket=", ticket, " retcode=", res.retcode, " ", res.comment);
         }
      }
-   Print("[FibLimitAssist] EVEN 完成：修改=", modified, " 跳过=", skipped, " 失败=", failed);
-   Alert("[FibLimitAssist] EVEN：修改 ", modified, " 笔", (skipped > 0 ? "，跳过 " + IntegerToString(skipped) + " 笔已入场价" : ""),
+   Print("[FibLimitAssist] 当前品种(", _Symbol, ")EVEN 完成：修改=", modified, " 跳过=", skipped, " 失败=", failed);
+   Alert("[FibLimitAssist] 当前品种(", _Symbol, ")EVEN：修改 ", modified, " 笔", (skipped > 0 ? "，跳过 " + IntegerToString(skipped) + " 笔已入场价" : ""),
          (failed > 0 ? "，失败 " + IntegerToString(failed) + " 笔" : ""));
+  }
+
+//+------------------------------------------------------------------+
+//| v1.13: ADJUST 按钮核心 - 识别最近的高低点                           |
+//+------------------------------------------------------------------+
+
+// 在指定窗口内识别分形点 (标准 Williams Fractals: 两侧各 D 根 bar 内为极值)
+// deviation: 与前一同向候选最小价格偏差 (点)
+// backstep:  与前一同向候选最小时间距离 (bar 数量, 用于替换紧挨的假信号)
+// 返回所有候选分形点, 时间从新到旧 (out[0] 是最近的)
+void BuildSwingCandidates(const double &prices[], const datetime &times[], int dir,
+                          datetime &outTimes[], double &outPrices[])
+  {
+   ArrayResize(outTimes,  0);
+   ArrayResize(outPrices, 0);
+
+   double devia = InpAdjustDeviation * _Point;
+   int    barSec = PeriodSeconds(_Period);
+   if(barSec <= 0) barSec = 60;   // 兜底
+
+   int arrTotal = ArraySize(prices);
+   for(int i = InpAdjustDepth; i < arrTotal - InpAdjustDepth; i++)
+     {
+      double v = prices[i];
+
+      // 左右窗口内为本方向极值
+      bool isSwing = true;
+      for(int k = 1; k <= InpAdjustDepth; k++)
+        {
+         if((dir == DIR_UP   && prices[i - k] > v) ||
+            (dir == DIR_DOWN && prices[i - k] < v))
+           { isSwing = false; break; }
+        }
+      if(!isSwing) continue;
+      for(int k = 1; k <= InpAdjustDepth; k++)
+        {
+         if((dir == DIR_UP   && prices[i + k] > v) ||
+            (dir == DIR_DOWN && prices[i + k] < v))
+           { isSwing = false; break; }
+        }
+      if(!isSwing) continue;
+
+      // deviation: 与最新候选价格偏差
+      int n = ArraySize(outPrices);
+      if(n > 0 && MathAbs(v - outPrices[n - 1]) < devia)
+         continue;
+      // backstep: 与最新候选时间距离 (用 bar 数 * PeriodSeconds 计算)
+      if(n > 0)
+        {
+         long distSec = (long)times[i] - (long)outTimes[n - 1];
+         // distSec 可能为负 (outTimes[n-1] 是更近的, 但扫描时 i 越大越旧, 不应该为负)
+         // 实际场景: outTimes 按扫描顺序, [n-1] 是最近加入的 (i 更小), 所以 distSec >= 0
+         long backstepSec = (long)InpAdjustBackstep * barSec;
+         if(distSec < backstepSec)
+           {
+            // 时间太近, 用极值更强者替换 (高点取更高, 低点取更低)
+            if((dir == DIR_UP   && v > outPrices[n - 1]) ||
+               (dir == DIR_DOWN && v < outPrices[n - 1]))
+              {
+               outPrices[n - 1] = v;
+               outTimes[n - 1]  = times[i];
+              }
+            continue;
+           }
+        }
+
+      // 加入候选
+      int sz = ArraySize(outPrices);
+      ArrayResize(outPrices, sz + 1);
+      ArrayResize(outTimes,  sz + 1);
+      outPrices[sz] = v;
+      outTimes[sz]  = times[i];
+     }
+  }
+
+// 找最近一个候选分形点 (按 datetime 最近)
+// dir = DIR_UP 找高点, DIR_DOWN 找低点
+// 失败返回 false
+bool FindNearestSwing(int dir, datetime &outTime, double &outPrice)
+  {
+   int totalBars = Bars(_Symbol, _Period);
+   int minRequired = InpAdjustDepth * 2 + 5;
+   if(totalBars < minRequired)
+     {
+      Print("[ADJUST] 错误: K线数据不足 (需要 ", minRequired, " 根, 实际 ", totalBars, " 根)");
+      return false;
+     }
+
+   // 查找范围 = 图表可见 bar 数 (用户偏好), 兜底 500
+   int visibleBars = (int)ChartGetInteger(0, CHART_VISIBLE_BARS);
+   int lookback = (visibleBars > 0) ? visibleBars : 500;
+   lookback = MathMin(lookback, totalBars);
+   if(lookback < minRequired) lookback = MathMin(minRequired, totalBars);
+
+   // 复制数据 (ArraySetAsSeries: arr[0] 是最新 bar)
+   double highs[], lows[];
+   datetime times[];
+   ArrayResize(highs,  lookback);
+   ArrayResize(lows,   lookback);
+   ArrayResize(times,  lookback);
+   ArraySetAsSeries(highs, true);
+   ArraySetAsSeries(lows,  true);
+   ArraySetAsSeries(times, true);
+   if(CopyHigh(_Symbol, _Period, 0, lookback, highs) < lookback) { Print("[ADJUST] 错误: CopyHigh 失败"); return false; }
+   if(CopyLow (_Symbol, _Period, 0, lookback, lows)  < lookback) { Print("[ADJUST] 错误: CopyLow 失败");  return false; }
+   if(CopyTime(_Symbol, _Period, 0, lookback, times) < lookback) { Print("[ADJUST] 错误: CopyTime 失败"); return false; }
+
+   // 收集候选分形点 (datetime 按新到旧排列)
+   datetime candTimes[];
+   double   candPrices[];
+
+   if(dir == DIR_UP)
+      BuildSwingCandidates(highs, times, dir, candTimes, candPrices);
+   else
+      BuildSwingCandidates(lows,  times, dir, candTimes, candPrices);
+
+   if(ArraySize(candPrices) == 0)
+     {
+      Print("[ADJUST] 错误: 未识别到有效的", (dir == DIR_UP ? "高点" : "低点"),
+            "候选 (InpAdjustDepth=", InpAdjustDepth,
+            ", InpAdjustDeviation=", InpAdjustDeviation,
+            ", InpAdjustBackstep=", InpAdjustBackstep, ")");
+      return false;
+     }
+
+   // candTimes 已经是按扫描顺序 (新→旧), candTimes[0] 是最近候选
+   outTime  = candTimes[0];
+   outPrice = candPrices[0];
+   return true;
+  }
+
+//+------------------------------------------------------------------+
+//| v1.13: ADJUST 入口 - 点击按钮后调用                                |
+//+------------------------------------------------------------------+
+void DoAdjust()
+  {
+   // 1. 找最近高点 (1.00)
+   datetime tH = 0; double pH = 0;
+   if(!FindNearestSwing(DIR_UP, tH, pH))
+     {
+      Alert("[FibLimitAssist] ADJUST 失败: 未识别到有效高点 (请放大图表或调整 Depth/Deviation/Backstep 参数)");
+      return;
+     }
+
+   // 2. 找最近低点 (0.00)
+   datetime tL = 0; double pL = 0;
+   if(!FindNearestSwing(DIR_DOWN, tL, pL))
+     {
+      Alert("[FibLimitAssist] ADJUST 失败: 未识别到有效低点 (请放大图表或调整 Depth/Deviation/Backstep 参数)");
+      return;
+     }
+
+   // 3. 异常检查
+   if(MathAbs(pH - pL) < _Point * InpAdjustDeviation)
+     {
+      Alert("[FibLimitAssist] ADJUST 失败: 识别的高低点距离过近 (",
+            DoubleToString(MathAbs(pH - pL) / _Point, 1), " points < ", InpAdjustDeviation, " points 阈值), 不调整");
+      return;
+     }
+   if(pH <= pL)
+     {
+      Alert("[FibLimitAssist] ADJUST 失败: 最近高点 (", DoubleToString(pH, _Digits), ") <= 最近低点 (",
+            DoubleToString(pL, _Digits), "), 数据异常, 不调整");
+      return;
+     }
+   if(tH > TimeCurrent() || tL > TimeCurrent())
+     {
+      Alert("[FibLimitAssist] ADJUST 失败: 识别出的时间戳在未来 (高点时间=", TimeToString(tH),
+            ", 低点时间=", TimeToString(tL), "), 数据异常, 不调整");
+      return;
+     }
+
+   // 4. 改全局变量 (其余 0.21/0.49/0.79 由 RefreshAll 通过 TheoPrice 自动重画)
+   g_p1 = NormalizeDouble(pH, _Digits);   // 1.00 = 最近高点
+   g_p0 = NormalizeDouble(pL, _Digits);   // 0.00 = 最近低点
+
+   // 5. 保存到全局变量 (会话内有效, 重启 MT5 后回到默认)
+   SaveState();
+
+   // 6. 重画
+   RefreshAll();
+
+   // 7. 反馈 (Print + Alert)
+   double rangePoints = (pH - pL) / _Point;
+   int dir = Dir();
+   string dirText = (dir == DIR_UP) ? "做多" : ((dir == DIR_DOWN) ? "做空" : "FLAT");
+
+   Print("[ADJUST] High (1.00): ", DoubleToString(pH, _Digits),
+         "  time=", TimeToString(tH, TIME_DATE|TIME_MINUTES));
+   Print("[ADJUST] Low  (0.00): ", DoubleToString(pL, _Digits),
+         "  time=", TimeToString(tL, TIME_DATE|TIME_MINUTES));
+   Print("[ADJUST] Range:       ", DoubleToString(rangePoints, 1), " points (", DoubleToString(pH - pL, _Digits), ")");
+   Print("[ADJUST] Direction:   ", dirText);
+   Print("[ADJUST] 0.79 = ", DoubleToString(TheoPrice(RATIO_079, g_p1, g_p0), _Digits));
+   Print("[ADJUST] 0.49 = ", DoubleToString(TheoPrice(RATIO_049, g_p1, g_p0), _Digits));
+   Print("[ADJUST] 0.21 = ", DoubleToString(TheoPrice(RATIO_021, g_p1, g_p0), _Digits));
+
+   Alert("[FibLimitAssist] ADJUST 完成 (", _Symbol, "): ",
+         "1.00=", DoubleToString(pH, _Digits), " (高点, ", TimeToString(tH, TIME_DATE|TIME_MINUTES), "), ",
+         "0.00=", DoubleToString(pL, _Digits), " (低点, ", TimeToString(tL, TIME_DATE|TIME_MINUTES), "), ",
+         "Range=", DoubleToString(rangePoints, 1), " points, 方向=", dirText);
   }
 
 //---------------------------- 风险/隐藏/市价 业务处理 --------------//
@@ -1100,6 +1527,9 @@ int OnInit()
   {
    g_prefix = "FLA_" + IntegerToString(ChartID()) + "_" + _Symbol + "_";
 
+   // v1.12: 自动探测服务器时区 (用于 CE(S)T 切日换算)
+   DetectTimezone();
+
    if(!LoadState())
      {
       // 首次附加：用当前可见价格区间生成默认斐波那契
@@ -1162,6 +1592,12 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
         {
          DoSwap();
          ObjectSetInteger(0, SwapName(), OBJPROP_STATE, false);
+         return;
+        }
+      if(sparam == AdjustName())   // v1.13: ADJUST 按钮 - 一键调整 1.00/0.00 到最近的高低点
+        {
+         DoAdjust();
+         ObjectSetInteger(0, AdjustName(), OBJPROP_STATE, false);
          return;
         }
       if(sparam == CancelPendingName())

@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.08"
+#property version   "1.09"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -296,7 +296,7 @@ bool CreatePnLLabel(string name)
 void UpdateButtonX()
   {
    // v1.08：g_btnX = 最右边 CALL 按钮的左 X（CALL 宽 100，右边距 8）
-   //  · 0.79/0.49 挂单按钮：宽 120，左 X = g_btnX - 332
+   //  · 0.79/0.49 挂单按钮：宽 120，左 X = g_btnX - 20（右边缘与 CALL/CANCEL 右边缘对齐 = w-8）
    //  · EVEN 按钮：宽 80，左 X = g_btnX - 208
    //  · CHALF 按钮：宽 100，左 X = g_btnX - 104
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
@@ -309,8 +309,8 @@ void UpdateButton(string name, double price, string text, int dir)
    int x = 0, y = 0;
    if(ChartTimePriceToXY(0, 0, RightAnchor(), price, x, y))
      {
-      // v1.08：挂单按钮宽 120，左 X = g_btnX - 332
-      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX - 332);
+      // v1.08b：挂单按钮宽 120，右边缘与 CALL/COLUMN 右边缘对齐（w-8），左 X = g_btnX - 20
+      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX - 20);
       ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 11);
      }
    ObjectSetString(0, name, OBJPROP_TEXT, text);
@@ -322,14 +322,14 @@ void UpdateLabel(string name, double price)
    if(ObjectFind(0, name) < 0) return;
    ObjectSetDouble(0, name, OBJPROP_PRICE, price);
   }
-// 右对齐标签更新：像素定位，右边缘对齐 0.21 标签位置的右边
-//  v1.08：0.21 标签贴在最右边按钮列的右侧挂单按钮上，0.79/0.49 现在宽 120，所以右 X = g_btnX - 212
+// 右对齐标签更新：像素定位，右边缘对齐挂单按钮右边缘（w-8 = g_btnX+100）
+//  v1.08b：0.21 标签右边缘与 0.79/0.49 按钮、CALL 按钮右边缘对齐
 void UpdateLabelRight(string name, double price, string text)
   {
    if(ObjectFind(0, name) < 0) return;
    int x = 0, y = 0;
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), price, x, y)) return;
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX - 212);  // v1.08：原 g_btnX + 200 → 挂单按钮右 X = g_btnX - 212
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX + 100);  // 右边缘 = w-8，与按钮列右对齐
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 2);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
   }
@@ -343,11 +343,11 @@ void UpdateSwapButton(int dir)
    color bg = (dir == DIR_UP) ? CLR_BUY_BG : ((dir == DIR_DOWN) ? CLR_SELL_BG : CLR_FLAT_BG);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
 
-   // v1.07：水平居中 + 垂直放到线段中点 ((p1+p0)/2 价格处)
+   // v1.08b：水平居中 + 垂直放到最上面那根线（MathMax(p1,p0)）中点
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
    int x = 0, y = 0;
-   double midPrice = (g_p1 + g_p0) / 2.0;
-   if(!ChartTimePriceToXY(0, 0, RightAnchor(), midPrice, x, y)) return;
+   double topPrice = MathMax(g_p1, g_p0);
+   if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - 80) / 2);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 11);
   }

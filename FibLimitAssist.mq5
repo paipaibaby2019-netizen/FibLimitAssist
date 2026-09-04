@@ -40,6 +40,11 @@ input string InpOrderComment     = "FibLimitAssist"; // 订单注释
 #define CLR_RISK_MID C'255,193,7'    // RISK 1%   中风险（黄）
 #define CLR_RISK_HI  C'244,67,54'    // RISK 2%   高风险（红）
 
+// v1.08 新增：P/L 数字标签颜色
+#define CLR_PLUS        C'0,150,60'   // 盈利（绿，带 +）
+#define CLR_MINUS       C'220,0,0'    // 亏损（红，带 -）
+#define CLR_PNL_NEUTRAL C'140,140,140'// 盈亏为零（灰）
+
 //---------------------------- 方向枚举 -----------------------------//
 enum ENUM_DIR { DIR_FLAT = 0, DIR_UP = 1, DIR_DOWN = 2 };
 

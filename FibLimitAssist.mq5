@@ -4,11 +4,13 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.07"
+#property version   "1.08"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
 #property description "· 单笔风险 = 余额固定百分比，盈亏比固定，手数反算并截断"
+#property description "· MKT 按钮两侧实时显示持仓浮盈 + 当日累计盈亏"
+#property description "· EVEN 按钮统一把任意持仓调到入场价平仓（盈改 SL，亏改 TP）"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=2:1, 0.49=1:1, 市价=1:1)
@@ -150,7 +152,7 @@ bool CreateButton(string name)
   {
    if(!ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0)) return false;
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_XSIZE, 200);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, 120);   // v1.08：挂单按钮从 200 缩到 120（v1.06 的 60%）
    ObjectSetInteger(0, name, OBJPROP_YSIZE, 22);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
@@ -196,6 +198,12 @@ string CancelPendingName() { return g_prefix + "CANCELP"; }
 string CloseAllName()      { return g_prefix + "CLOSEALL"; }
 // 平仓一半按钮对象名
 string CloseHalfName()     { return g_prefix + "CLOSEHALF"; }
+// v1.08：入场价平仓按钮对象名
+string EvenName()          { return g_prefix + "EVEN"; }
+// v1.08：MKT 左侧的实时浮盈标签（账户当前所有持仓的浮盈合计）
+string PnLLeftName()       { return g_prefix + "PNLL"; }
+// v1.08：MKT 右侧的当日盈亏标签（本地 00:00 起所有已平仓+未平仓盈亏合计）
+string PnLRightName()      { return g_prefix + "PNLR"; }
 // 风险切换按钮对象名
 string RiskName()          { return g_prefix + "RISK"; }
 // 市价下单按钮对象名
@@ -252,20 +260,42 @@ void CreateObjects()
    CreateButton(BName(RATIO_049));
    CreateSwapButton();
    CreateActionButton(CancelPendingName(), 100, "CANCEL",       C'120,120,120', "取消账户内全部挂单（含手动单）");
-   CreateActionButton(CloseAllName(),      110, "CLOSE ALL",    C'200,120,20',  "平掉账户内全部持仓（不涉及挂单）");
-   CreateActionButton(CloseHalfName(),     130, "CLOSE HALF",   C'230,140,40',  "按手数砍半平仓（账户全部品种）；若砍半后 < 最小手数则全平该仓位");
+   CreateActionButton(CloseAllName(),      100, "CALL",          C'200,120,20',  "平掉账户内全部持仓（不涉及挂单）");
+   CreateActionButton(CloseHalfName(),     100, "CHALF",         C'230,140,40',  "按手数砍半平仓（账户全部品种）；若砍半后 < 最小手数则全平该仓位");
+   CreateActionButton(EvenName(),           80, "EVEN",          C'60,120,200',  "一键入场价：盈利仓位SL改到入场；亏损仓位TP改到入场（保本平仓）");
    CreateActionButton(RiskName(),           80, "",              C'90,90,90',   "点击循环切换单笔风险档位：0.5% → 1% → 2% → 0.5%");
    CreateActionButton(MarketName(),        110, "MARKET",        C'140,140,140',"市价下单（止损 = 1.00 ± Range×1%，盈亏比 1:1）");
    CreateActionButton(HideName(),           80, "HIDE",          C'60,60,60',   "隐藏/显示 EA 全部线条与按钮（此按钮自身始终显示）");
 
+   // v1.08：MKT 两侧的实时盈亏数字标签（OBJ_LABEL 像素定位）
+   CreatePnLLabel(PnLLeftName());
+   CreatePnLLabel(PnLRightName());
+
    CreateLabelRight(LName(RATIO_021), "0.21", CLR_DECO);
+  }
+
+// v1.08：盈亏数字标签（OBJ_LABEL 像素定位）
+bool CreatePnLLabel(string name)
+  {
+   if(!ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0)) return false;
+   ObjectSetString(0, name, OBJPROP_TEXT, "");
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   return true;
   }
 
 //---------------------------- 刷新显示 -----------------------------//
 void UpdateButtonX()
   {
+   // v1.08：g_btnX = 最右边 CALL 按钮的左 X（CALL 宽 100，右边距 8）
+   //  · 0.79/0.49 挂单按钮：宽 120，左 X = g_btnX - 332
+   //  · EVEN 按钮：宽 80，左 X = g_btnX - 208
+   //  · CHALF 按钮：宽 100，左 X = g_btnX - 104
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-   g_btnX = w - 208;
+   g_btnX = w - 108;
    if(g_btnX < 0) g_btnX = 0;
   }
 void UpdateButton(string name, double price, string text, int dir)
@@ -274,7 +304,8 @@ void UpdateButton(string name, double price, string text, int dir)
    int x = 0, y = 0;
    if(ChartTimePriceToXY(0, 0, RightAnchor(), price, x, y))
      {
-      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX);
+      // v1.08：挂单按钮宽 120，左 X = g_btnX - 332
+      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX - 332);
       ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 11);
      }
    ObjectSetString(0, name, OBJPROP_TEXT, text);
@@ -286,13 +317,14 @@ void UpdateLabel(string name, double price)
    if(ObjectFind(0, name) < 0) return;
    ObjectSetDouble(0, name, OBJPROP_PRICE, price);
   }
-// 右对齐标签更新：像素定位，右边缘对齐按钮右边缘(g_btnX+200)，Y 对齐线价格
+// 右对齐标签更新：像素定位，右边缘对齐 0.21 标签位置的右边
+//  v1.08：0.21 标签贴在最右边按钮列的右侧挂单按钮上，0.79/0.49 现在宽 120，所以右 X = g_btnX - 212
 void UpdateLabelRight(string name, double price, string text)
   {
    if(ObjectFind(0, name) < 0) return;
    int x = 0, y = 0;
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), price, x, y)) return;
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX + 200);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX - 212);  // v1.08：原 g_btnX + 200 → 挂单按钮右 X = g_btnX - 212
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 2);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
   }
@@ -326,13 +358,14 @@ void UpdateTopButtons()
    string cancelName = CancelPendingName();
    if(ObjectFind(0, cancelName) >= 0)
      {
-      ObjectSetInteger(0, cancelName, OBJPROP_XDISTANCE, g_btnX + 200 - 100);
+      // v1.08：CANCEL 左 X = g_btnX（右边距 8px，宽 100），原表达式 g_btnX+200-100 等价
+      ObjectSetInteger(0, cancelName, OBJPROP_XDISTANCE, g_btnX);
       ObjectSetInteger(0, cancelName, OBJPROP_YDISTANCE, yBtn);
      }
   }
 
-// 最下面那根线的全部按钮：
-// 左侧 HIDE(80) | RISK(80)；中间 MARKET(110) 水平居中；右侧 CLOSE_HALF(130) | CLOSE_ALL(110) 右对齐 g_btnX+200
+// 最下面那根线的全部按钮 (v1.08)：
+//  左侧：HIDE(80) | RISK(80) | ...空隙... | PL_LEFT(标签) | MARKET(110 居中) | PL_RIGHT(标签) | ...空隙... | EVEN(80) | CHALF(100) | CALL(100)
 void UpdateBottomButtons()
   {
    double botPrice = MathMin(g_p1, g_p0);
@@ -341,36 +374,60 @@ void UpdateBottomButtons()
    int yBtn = y - 26; if(yBtn < 0) yBtn = 0;
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
 
-   string hideName = HideName();
-   if(ObjectFind(0, hideName) >= 0)
+   // MARKET 居中位置 (宽 110)
+   int marketW = 110;
+   int marketX = (w - marketW) / 2;
+
+   // 左侧 HIDE / RISK
+   if(ObjectFind(0, HideName()) >= 0)
      {
-      ObjectSetInteger(0, hideName, OBJPROP_XDISTANCE, 10);
-      ObjectSetInteger(0, hideName, OBJPROP_YDISTANCE, yBtn);
+      ObjectSetInteger(0, HideName(), OBJPROP_XDISTANCE, 10);
+      ObjectSetInteger(0, HideName(), OBJPROP_YDISTANCE, yBtn);
      }
-   string riskName = RiskName();
-   if(ObjectFind(0, riskName) >= 0)
+   if(ObjectFind(0, RiskName()) >= 0)
      {
-      ObjectSetInteger(0, riskName, OBJPROP_XDISTANCE, 10 + 80 + 4);
-      ObjectSetInteger(0, riskName, OBJPROP_YDISTANCE, yBtn);
+      ObjectSetInteger(0, RiskName(), OBJPROP_XDISTANCE, 10 + 80 + 4);
+      ObjectSetInteger(0, RiskName(), OBJPROP_YDISTANCE, yBtn);
      }
-   string marketName = MarketName();
-   if(ObjectFind(0, marketName) >= 0)
+
+   // 中间 MKT
+   if(ObjectFind(0, MarketName()) >= 0)
      {
-      ObjectSetInteger(0, marketName, OBJPROP_XDISTANCE, (w - 110) / 2);
-      ObjectSetInteger(0, marketName, OBJPROP_YDISTANCE, yBtn);
+      ObjectSetInteger(0, MarketName(), OBJPROP_XDISTANCE, marketX);
+      ObjectSetInteger(0, MarketName(), OBJPROP_YDISTANCE, yBtn);
      }
-   string closeAllName = CloseAllName();
-   if(ObjectFind(0, closeAllName) >= 0)
+
+   // v1.08：MKT 两侧 P/L 标签（OBJ_LABEL 像素定位）
+   // PL_LEFT：MKT 左 4px 处，右对齐文字（"(-1012)"等，最右字符对齐到该 X）
+   // PL_RIGHT：MKT 右 4px 处，左对齐文字
+   if(ObjectFind(0, PnLLeftName()) >= 0)
      {
-      ObjectSetInteger(0, closeAllName, OBJPROP_XDISTANCE, g_btnX + 200 - 110);
-      ObjectSetInteger(0, closeAllName, OBJPROP_YDISTANCE, yBtn);
+      ObjectSetInteger(0, PnLLeftName(), OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
+      ObjectSetInteger(0, PnLLeftName(), OBJPROP_XDISTANCE, marketX - 6);
+      ObjectSetInteger(0, PnLLeftName(), OBJPROP_YDISTANCE, yBtn + 4);
      }
-   string closeHalfName = CloseHalfName();
-   if(ObjectFind(0, closeHalfName) >= 0)
+   if(ObjectFind(0, PnLRightName()) >= 0)
      {
-      // CLOSE_HALF 在 CLOSE_ALL 左侧：右边 = CLOSE_ALL 左边 - 4 = g_btnX + 200 - 110 - 4
-      ObjectSetInteger(0, closeHalfName, OBJPROP_XDISTANCE, g_btnX + 200 - 110 - 4 - 130);
-      ObjectSetInteger(0, closeHalfName, OBJPROP_YDISTANCE, yBtn);
+      ObjectSetInteger(0, PnLRightName(), OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+      ObjectSetInteger(0, PnLRightName(), OBJPROP_XDISTANCE, marketX + marketW + 6);
+      ObjectSetInteger(0, PnLRightName(), OBJPROP_YDISTANCE, yBtn + 4);
+     }
+
+   // 右侧 EVEN / CHALF / CALL（CALL 最右，左 X = g_btnX）
+   if(ObjectFind(0, CloseAllName()) >= 0)
+     {
+      ObjectSetInteger(0, CloseAllName(), OBJPROP_XDISTANCE, g_btnX);
+      ObjectSetInteger(0, CloseAllName(), OBJPROP_YDISTANCE, yBtn);
+     }
+   if(ObjectFind(0, CloseHalfName()) >= 0)
+     {
+      ObjectSetInteger(0, CloseHalfName(), OBJPROP_XDISTANCE, g_btnX - 100 - 4);
+      ObjectSetInteger(0, CloseHalfName(), OBJPROP_YDISTANCE, yBtn);
+     }
+   if(ObjectFind(0, EvenName()) >= 0)
+     {
+      ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, g_btnX - 100 - 4 - 100 - 4);
+      ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yBtn);
      }
   }
 
@@ -480,6 +537,7 @@ void RefreshAll()
    UpdateHideButton();
    UpdateTopButtons();
    UpdateBottomButtons();
+   UpdatePnLDisplay();   // v1.08：MKT 两侧的实时盈亏数字
 
    UpdateLabelRight(LName(RATIO_021), TheoPrice(RATIO_021, g_p1, g_p0), "0.21");  // v1.07：仅保留 0.21 标签
 
@@ -515,6 +573,85 @@ double CalcLotFor(double entry, int dir)
    double sl = (dir == DIR_UP) ? (g_p1 - range * InpSL_OffsetPercent / 100.0)
                                : (g_p1 + range * InpSL_OffsetPercent / 100.0);
    return CalcLot(entry, sl);
+  }
+
+//---------------------------- 实时盈亏（v1.08）-------------------//
+// 当前所有持仓的浮盈合计（含账户内全部品种、全部魔术号）
+double CalcFloatPnL()
+  {
+   double total = 0.0;
+   int n = PositionsTotal();
+   for(int i = 0; i < n; i++)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      total += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+     }
+   return total;
+  }
+
+// 当日（本地时间 00:00 起）所有 deals 的盈亏合计（含已平仓 + 未平仓）
+// 已平仓：遍历历史 deals，取 profit + swap + commission
+// 未平仓部分由 CalcFloatPnL 叠加，避免重复计算
+double CalcDayPnL()
+  {
+   // 本地时间 00:00
+   datetime dayStart = StringToTime(TimeToString(TimeLocal(), TIME_DATE));   // 本地日期 00:00:00
+   double closed = 0.0;
+
+   // 拉取从 dayStart 到现在的历史
+   if(HistorySelect(dayStart, TimeCurrent()))
+     {
+      int deals = HistoryDealsTotal();
+      for(int i = 0; i < deals; i++)
+        {
+         ulong ticket = HistoryDealGetTicket(i);
+         if(ticket == 0) continue;
+         // 排除余额存取 (DEAL_TYPE_BALANCE)
+         long type = HistoryDealGetInteger(ticket, DEAL_TYPE);
+         if(type == DEAL_TYPE_BALANCE) continue;
+         closed += HistoryDealGetDouble(ticket, DEAL_PROFIT)
+                 + HistoryDealGetDouble(ticket, DEAL_SWAP)
+                 + HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+        }
+     }
+   // 已平仓部分 + 当前未平仓的浮盈
+   return closed + CalcFloatPnL();
+  }
+
+// 把金额格式化为 "(+1234)" / "(-5678)" 字符串
+string FormatPnL(double v)
+  {
+   if(MathAbs(v) < 0.5) return "(0)";
+   string s;
+   if(v > 0) s = "(+" + IntegerToString((int)MathRound(v)) + ")";
+   else       s = "(" + IntegerToString((int)MathRound(v)) + ")";   // 负数自带负号
+   return s;
+  }
+
+// 根据正负返回颜色
+color PnLColor(double v)
+  {
+   if(MathAbs(v) < 0.5) return CLR_PNL_NEUTRAL;
+   return (v > 0) ? CLR_PLUS : CLR_MINUS;
+  }
+
+// v1.08：MKT 两侧的实时盈亏标签刷新
+void UpdatePnLDisplay()
+  {
+   double f = CalcFloatPnL();
+   double d = CalcDayPnL();
+
+   if(ObjectFind(0, PnLLeftName()) >= 0)
+     {
+      ObjectSetString(0, PnLLeftName(), OBJPROP_TEXT, FormatPnL(f));
+      ObjectSetInteger(0, PnLLeftName(), OBJPROP_COLOR, PnLColor(f));
+     }
+   if(ObjectFind(0, PnLRightName()) >= 0)
+     {
+      ObjectSetString(0, PnLRightName(), OBJPROP_TEXT, FormatPnL(d));
+      ObjectSetInteger(0, PnLRightName(), OBJPROP_COLOR, PnLColor(d));
+     }
   }
 
 //---------------------------- 下单 -----------------------------//
@@ -812,6 +949,72 @@ void CloseHalfPositions()
          (failed > 0 ? "，失败 " + IntegerToString(failed) + " 笔" : ""));
   }
 
+//---------------------------- EVEN 一键入场价 (v1.08) -----------------//
+//  · 盈利仓位：把 SL 改到入场价（标准 breakeven）
+//  · 亏损仓位：把 TP 改到入场价（价格回到入场即保本离场）
+//  目标统一：任意持仓「价格回到入场价即平仓」→ 既保本锁利，也避免继续亏损
+void DoEven()
+  {
+   int modified = 0, failed = 0, skipped = 0;
+   int n = PositionsTotal();
+   for(int i = 0; i < n; i++)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      string sym    = PositionGetString(POSITION_SYMBOL);
+      long   ptype  = PositionGetInteger(POSITION_TYPE);
+      double entry  = PositionGetDouble(POSITION_PRICE_OPEN);
+      double curSL  = PositionGetDouble(POSITION_SL);
+      double curTP  = PositionGetDouble(POSITION_TP);
+      double cur    = (ptype == POSITION_TYPE_BUY)
+                      ? SymbolInfoDouble(sym, SYMBOL_BID)
+                      : SymbolInfoDouble(sym, SYMBOL_ASK);
+
+      bool profitable;
+      if(ptype == POSITION_TYPE_BUY)  profitable = (cur > entry);
+      else                            profitable = (cur < entry);
+
+      double newSL = curSL, newTP = curTP;
+      if(profitable)
+        {
+         if(MathAbs(curSL - entry) < _Point / 2.0) { skipped++; continue; }   // 已是 breakeven
+         newSL = entry;
+        }
+      else
+        {
+         if(curTP > 0 && MathAbs(curTP - entry) < _Point / 2.0) { skipped++; continue; }
+         newTP = entry;
+        }
+
+      // normalize 到品种最小价位
+      double nd = _Digits;
+      if(StringFind(sym, "XAU") >= 0 || StringFind(sym, "XAG") >= 0) nd = 2;   // 金属保留 2 位
+      newSL = NormalizeDouble(newSL, (int)nd);
+      newTP = NormalizeDouble(newTP, (int)nd);
+
+      MqlTradeRequest req;
+      MqlTradeResult  res;
+      ZeroMemory(req); ZeroMemory(res);
+      req.action   = TRADE_ACTION_SLTP;
+      req.symbol   = sym;
+      req.position = ticket;
+      req.magic    = PositionGetInteger(POSITION_MAGIC);
+      req.sl       = newSL;
+      req.tp       = newTP;
+
+      if(OrderSend(req, res))
+         modified++;
+      else
+        {
+         failed++;
+         Print("[FibLimitAssist] EVEN 修改失败 ticket=", ticket, " retcode=", res.retcode, " ", res.comment);
+        }
+     }
+   Print("[FibLimitAssist] EVEN 完成：修改=", modified, " 跳过=", skipped, " 失败=", failed);
+   Alert("[FibLimitAssist] EVEN：修改 ", modified, " 笔", (skipped > 0 ? "，跳过 " + IntegerToString(skipped) + " 笔已入场价" : ""),
+         (failed > 0 ? "，失败 " + IntegerToString(failed) + " 笔" : ""));
+  }
+
 //---------------------------- 风险/隐藏/市价 业务处理 --------------//
 // 风险档位循环：1% → 2% → 3% → 1% (即 0.5 → 1 → 2 → 0.5)
 void CycleRisk()
@@ -934,6 +1137,7 @@ void OnTick()
    if(bt != lastBarTime) { lastBarTime = bt; g_dirty = true; }
 
    if(g_dirty) { RefreshAll(); g_dirty = false; }
+   else        { UpdatePnLDisplay(); ChartRedraw(0); }   // v1.08：每个 tick 刷新 MKT 两侧的实时盈亏
   }
 
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
@@ -971,6 +1175,13 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
         {
          CloseHalfPositions();
          ObjectSetInteger(0, CloseHalfName(), OBJPROP_STATE, false);
+         return;
+        }
+      if(sparam == EvenName())
+        {
+         DoEven();
+         ObjectSetInteger(0, EvenName(), OBJPROP_STATE, false);
+         UpdatePnLDisplay();   // 立刻刷一次浮盈数字
          return;
         }
       if(sparam == RiskName())

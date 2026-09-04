@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.03"
+#property version   "1.04"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -43,7 +43,6 @@ double   g_p79, g_p49;         // 0.79 / 0.49 分割线价格 (可手动偏移)
 double   g_lastBalance = -1.0; // 上次刷新时的余额
 bool     g_dirty = true;       // 需要刷新标记
 int      g_btnX = 0;           // 按钮固定 X 像素位置
-datetime g_timeLeft = 0;       // 所有线的共享左端时间 (左端可左右拉伸)
 
 //---------------------------- 工具函数 -----------------------------//
 // 对象命名：按比例生成唯一名称
@@ -87,7 +86,7 @@ datetime RightAnchor()
    return (t == 0) ? TimeCurrent() : t;
   }
 
-// 左侧可见 bar 偏移 (用于计算默认左端中间位置)
+// 左侧可见 bar 偏移 (用于未来扩展)
 int LeftShift()
   {
    int first = (int)ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0);
@@ -98,12 +97,6 @@ int LeftShift()
    if(s >= bars)  s = bars - 1;
    return s;
   }
-datetime MidAnchor()
-  {
-   int shift = LeftShift() / 2 + 1;
-   datetime t = iTime(_Symbol, _Period, shift);
-   return (t == 0) ? TimeCurrent() : t;
-  }
 
 //---------------------------- 状态持久化 ---------------------------//
 // 使用非临时全局变量：会话内(切换周期/缩放)保留，MT5 重启后自动清空
@@ -113,7 +106,6 @@ void SaveState()
    GlobalVariableSet(g_prefix + "p0",  g_p0);
    GlobalVariableSet(g_prefix + "p79", g_p79);
    GlobalVariableSet(g_prefix + "p49", g_p49);
-   GlobalVariableSet(g_prefix + "tLeft", (double)g_timeLeft);
   }
 bool LoadState()
   {
@@ -122,20 +114,17 @@ bool LoadState()
    g_p0  = GlobalVariableGet(g_prefix + "p0");
    g_p79 = GlobalVariableGet(g_prefix + "p79");
    g_p49 = GlobalVariableGet(g_prefix + "p49");
-   if(GlobalVariableCheck(g_prefix + "tLeft"))
-      g_timeLeft = (datetime)GlobalVariableGet(g_prefix + "tLeft");
    return true;
   }
 
 //---------------------------- 对象创建 -----------------------------//
-// 向右延伸的水平射线：左端为唯一锚点 (可上下改价 / 左右拉伸)，右端自动延伸到最右
-bool CreateRay(string name, datetime t, double price, bool selectable, color clr, int style, int width)
+// 横线 (OBJ_HLINE)：横跨整个图表，拖拽时只能上下改价
+bool CreateHLine(string name, double price, bool selectable, color clr, int style, int width)
   {
-   if(!ObjectCreate(0, name, OBJ_TREND, 0, t, price, t + 3600, price)) return false;
+   if(!ObjectCreate(0, name, OBJ_HLINE, 0, 0, price)) return false;
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
    ObjectSetInteger(0, name, OBJPROP_STYLE, style);
    ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
-   ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, true);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, selectable);
    ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
@@ -230,11 +219,11 @@ bool CreateActionButton(string name, int xsize, string text, color bg, string to
   }
 void CreateObjects()
   {
-   CreateRay(HName(RATIO_100), g_timeLeft, g_p1, true,  CLR_END,  STYLE_SOLID, 2);
-   CreateRay(HName(RATIO_000), g_timeLeft, g_p0, true,  CLR_END,  STYLE_SOLID, 2);
-   CreateRay(HName(RATIO_079), g_timeLeft, g_p79, true, CLR_MID,  STYLE_SOLID, 1);
-   CreateRay(HName(RATIO_049), g_timeLeft, g_p49, true, CLR_MID,  STYLE_SOLID, 1);
-   CreateRay(HName(RATIO_021), g_timeLeft, TheoPrice(RATIO_021, g_p1, g_p0), false, CLR_DECO, STYLE_DASHDOT, 1);
+   CreateHLine(HName(RATIO_100), g_p1,  true,  CLR_END,  STYLE_SOLID, 2);
+   CreateHLine(HName(RATIO_000), g_p0,  true,  CLR_END,  STYLE_SOLID, 2);
+   CreateHLine(HName(RATIO_079), g_p79, true,  CLR_MID,  STYLE_SOLID, 1);
+   CreateHLine(HName(RATIO_049), g_p49, true,  CLR_MID,  STYLE_SOLID, 1);
+   CreateHLine(HName(RATIO_021), TheoPrice(RATIO_021, g_p1, g_p0), false, CLR_DECO, STYLE_DASHDOT, 1);
 
    CreateButton(BName(RATIO_079));
    CreateButton(BName(RATIO_049));
@@ -242,8 +231,8 @@ void CreateObjects()
    CreateActionButton(CancelPendingName(), 100, "CANCEL",      C'120,120,120', "取消账户内全部挂单（含手动单）");
    CreateActionButton(CloseAllName(),      110, "CLOSE ALL",   C'200,120,20',  "平掉账户内全部持仓（不涉及挂单）");
 
-   CreateLabel(LName(RATIO_100), "1.00", CLR_END,   ANCHOR_RIGHT_LOWER);
-   CreateLabel(LName(RATIO_000), "0.00", CLR_END,   ANCHOR_RIGHT_LOWER);
+   CreateLabelRight(LName(RATIO_100), "1.00", CLR_END);
+   CreateLabelRight(LName(RATIO_000), "0.00", CLR_END);
    CreateLabelRight(LName(RATIO_021), "0.21", CLR_DECO);
   }
 
@@ -267,12 +256,10 @@ void UpdateButton(string name, double price, string text, int dir)
    color bg = (dir == DIR_UP) ? CLR_BUY_BG : ((dir == DIR_DOWN) ? CLR_SELL_BG : CLR_FLAT_BG);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
   }
-void UpdateLabel(string name, double price, string text)
+void UpdateLabel(string name, double price)
   {
    if(ObjectFind(0, name) < 0) return;
-   ObjectSetInteger(0, name, OBJPROP_TIME, (long)g_timeLeft);
    ObjectSetDouble(0, name, OBJPROP_PRICE, price);
-   ObjectSetString(0, name, OBJPROP_TEXT, text);
   }
 // 右对齐标签更新：像素定位，右边缘对齐按钮右边缘(g_btnX+200)，Y 对齐线价格
 void UpdateLabelRight(string name, double price, string text)
@@ -283,16 +270,6 @@ void UpdateLabelRight(string name, double price, string text)
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX + 200);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 2);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
-  }
-
-// 设置射线的左端时间与价位 (两个锚点价格相同 → 水平；右端射线自动延伸)
-void SetRay(string name, datetime t, double price)
-  {
-   if(ObjectFind(0, name) < 0) return;
-   ObjectSetInteger(0, name, OBJPROP_TIME, 0, (long)t);
-   ObjectSetInteger(0, name, OBJPROP_TIME, 1, (long)(t + 3600));
-   ObjectSetDouble(0, name, OBJPROP_PRICE, 0, price);
-   ObjectSetDouble(0, name, OBJPROP_PRICE, 1, price);
   }
 
 void UpdateSwapButton(int dir)
@@ -350,11 +327,11 @@ void RefreshAll()
   {
    UpdateButtonX();
 
-   SetRay(HName(RATIO_100), g_timeLeft, g_p1);
-   SetRay(HName(RATIO_000), g_timeLeft, g_p0);
-   SetRay(HName(RATIO_079), g_timeLeft, g_p79);
-   SetRay(HName(RATIO_049), g_timeLeft, g_p49);
-   SetRay(HName(RATIO_021), g_timeLeft, TheoPrice(RATIO_021, g_p1, g_p0));
+   UpdateLabel(HName(RATIO_100), g_p1);
+   UpdateLabel(HName(RATIO_000), g_p0);
+   UpdateLabel(HName(RATIO_079), g_p79);
+   UpdateLabel(HName(RATIO_049), g_p49);
+   UpdateLabel(HName(RATIO_021), TheoPrice(RATIO_021, g_p1, g_p0));
 
    int dir = Dir();
    double price79 = LevelPrice(RATIO_079);
@@ -368,8 +345,8 @@ void RefreshAll()
    UpdateSwapButton(dir);
    UpdateTopButtons();
 
-   UpdateLabel(LName(RATIO_100), g_p1, "1.00");
-   UpdateLabel(LName(RATIO_000), g_p0, "0.00");
+   UpdateLabelRight(LName(RATIO_100), g_p1, "1.00");
+   UpdateLabelRight(LName(RATIO_000), g_p0, "0.00");
    UpdateLabelRight(LName(RATIO_021), TheoPrice(RATIO_021, g_p1, g_p0), "0.21");
 
    ChartRedraw(0);
@@ -575,9 +552,8 @@ double RatioOfButton(string name)
    return -1.0;
   }
 
-void ApplyDrag(double r, double price, datetime t)
+void ApplyDrag(double r, double price)
   {
-   g_timeLeft = t;   // 左端时间随拖动更新 (所有线共享左边界)
    if(r == RATIO_100)
      {
       g_p1 = price;
@@ -634,9 +610,6 @@ int OnInit()
       g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
      }
 
-   if(g_timeLeft == 0)
-      g_timeLeft = MidAnchor();
-
    CreateObjects();
    g_lastBalance = AccountInfoDouble(ACCOUNT_BALANCE);
    RefreshAll();
@@ -670,8 +643,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       double r = RatioOfHLine(sparam);
       if(r < 0) return;
       double price = ObjectGetDouble(0, sparam, OBJPROP_PRICE, 0);
-      datetime t = (datetime)ObjectGetInteger(0, sparam, OBJPROP_TIME, 0);
-      ApplyDrag(r, price, t);
+      ApplyDrag(r, price);
      }
    else if(id == CHARTEVENT_OBJECT_CLICK)
      {

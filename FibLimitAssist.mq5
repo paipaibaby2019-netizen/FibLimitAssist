@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.06"
+#property version   "1.07"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -31,6 +31,12 @@ input string InpOrderComment     = "FibLimitAssist"; // 订单注释
 #define CLR_BUY_BG   C'76,175,80'    // 买单按钮底色
 #define CLR_SELL_BG  C'244,67,54'    // 卖单按钮底色
 #define CLR_FLAT_BG  C'140,140,140'  // 方向未定义按钮底色
+// v1.07 新增：HIDE/SHOW 状态色 + RISK 三档色
+#define CLR_HIDE_OFF C'60,60,60'     // SHOW 状态：当前显示（深灰）
+#define CLR_HIDE_ON  C'200,120,20'   // HIDE 状态：当前隐藏（橙黄警示）
+#define CLR_RISK_LOW C'76,175,80'    // RISK 0.5% 低风险（绿）
+#define CLR_RISK_MID C'255,193,7'    // RISK 1%   中风险（黄）
+#define CLR_RISK_HI  C'244,67,54'    // RISK 2%   高风险（红）
 
 //---------------------------- 方向枚举 -----------------------------//
 enum ENUM_DIR { DIR_FLAT = 0, DIR_UP = 1, DIR_DOWN = 2 };
@@ -252,8 +258,6 @@ void CreateObjects()
    CreateActionButton(MarketName(),        110, "MARKET",        C'140,140,140',"市价下单（止损 = 1.00 ± Range×1%，盈亏比 1:1）");
    CreateActionButton(HideName(),           80, "HIDE",          C'60,60,60',   "隐藏/显示 EA 全部线条与按钮（此按钮自身始终显示）");
 
-   CreateLabelRight(LName(RATIO_100), "1.00", CLR_END);
-   CreateLabelRight(LName(RATIO_000), "0.00", CLR_END);
    CreateLabelRight(LName(RATIO_021), "0.21", CLR_DECO);
   }
 
@@ -301,9 +305,17 @@ void UpdateSwapButton(int dir)
    ObjectSetString(0, name, OBJPROP_TEXT, t);
    color bg = (dir == DIR_UP) ? CLR_BUY_BG : ((dir == DIR_DOWN) ? CLR_SELL_BG : CLR_FLAT_BG);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
+
+   // v1.07：水平居中 + 垂直放到线段中点 ((p1+p0)/2 价格处)
+   int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   int x = 0, y = 0;
+   double midPrice = (g_p1 + g_p0) / 2.0;
+   if(!ChartTimePriceToXY(0, 0, RightAnchor(), midPrice, x, y)) return;
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - 80) / 2);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 11);
   }
 
-// 最上面那根线两侧按钮：左 SWAP (80) | 间隔 4 | CANCEL (100)，右边缘对齐 g_btnX+200
+// 最上面那根线右侧：仅 CANCEL 按钮（v1.07：SWAP 已移到线段中点）
 void UpdateTopButtons()
   {
    double topPrice = MathMax(g_p1, g_p0);
@@ -316,14 +328,6 @@ void UpdateTopButtons()
      {
       ObjectSetInteger(0, cancelName, OBJPROP_XDISTANCE, g_btnX + 200 - 100);
       ObjectSetInteger(0, cancelName, OBJPROP_YDISTANCE, yBtn);
-     }
-
-   string swapName = SwapName();
-   if(ObjectFind(0, swapName) >= 0)
-     {
-      // SWAP 在 CANCEL 左侧：右边 = CANCEL 左边 - 4 = g_btnX + 200 - 100 - 4 = g_btnX + 96
-      ObjectSetInteger(0, swapName, OBJPROP_XDISTANCE, g_btnX + 200 - 100 - 4 - 80);
-      ObjectSetInteger(0, swapName, OBJPROP_YDISTANCE, yBtn);
      }
   }
 
@@ -376,15 +380,19 @@ string BuildButtonText(double r, double lot)
    return StringFormat("%.2f (%.*f)", r, InpLotDecimals, lot);
   }
 
-// HIDE/SHOW 按钮文字
+// HIDE/SHOW 按钮文字 + 颜色 + sticky 状态（v1.07）
+//  · 显示态（g_hidden=false）：文字 HIDE，底色深灰，按钮弹起
+//  · 隐藏态（g_hidden=true）：文字 SHOW，底色橙黄，按钮按下
 void UpdateHideButton()
   {
    string name = HideName();
    if(ObjectFind(0, name) < 0) return;
    ObjectSetString(0, name, OBJPROP_TEXT, g_hidden ? "SHOW" : "HIDE");
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, g_hidden ? CLR_HIDE_ON : CLR_HIDE_OFF);
+   ObjectSetInteger(0, name, OBJPROP_STATE, g_hidden);   // sticky：按下表示当前隐藏中
   }
 
-// 风险按钮文字：循环档位 (0.5 → 1 → 2 → 0.5 ...)
+// 风险按钮文字 + 颜色（v1.07：循环档位 0.5 → 1 → 2 → 0.5；底色按档位变化，比例越高越醒目）
 void UpdateRiskButton()
   {
    string name = RiskName();
@@ -394,6 +402,13 @@ void UpdateRiskButton()
    if(dot >= 0 && StringSubstr(s, dot + 1) == "0")   // 去掉末尾 ".0"，如 1.0 → 1
       s = StringSubstr(s, 0, dot);
    ObjectSetString(0, name, OBJPROP_TEXT, s + "%");
+
+   // 三档配色：低风险绿 / 中风险黄 / 高风险红
+   color bg = CLR_RISK_MID;
+   if(MathAbs(g_riskPercent - 0.5) < 1e-9) bg = CLR_RISK_LOW;
+   else if(MathAbs(g_riskPercent - 1.0) < 1e-9) bg = CLR_RISK_MID;
+   else if(MathAbs(g_riskPercent - 2.0) < 1e-9) bg = CLR_RISK_HI;
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
   }
 
 // 市价按钮文字与颜色：按当前方向显示 BUY MKT / SELL MKT，FLAT 时显示 --
@@ -408,7 +423,11 @@ void UpdateMarketButton(int dir)
   }
 
 // 应用隐藏/显示状态：遍历所有 EA 对象，HIDE 按钮自身除外
-// 注意：OBJ_BUTTON 的 OBJPROP_HIDDEN 在部分 MT5 版本无效，改为移出屏幕隐藏；线/标签用 OBJPROP_HIDDEN
+// v1.07 改进：
+//  · 按钮：OBJPROP_HIDDEN 无效，移出屏幕 (XDISTANCE = -10000)
+//  · 水平线：OBJPROP_HIDDEN 在部分 MT5 版本对 HLINE 不生效，改为把价格改到 1e20（屏幕外）
+//          显示时由 UpdateLabel 改回 g_p1/g_p0/g_p79/g_p49（UpdateLabel 自身在 g_hidden 时跳过）
+//  · 标签：OBJPROP_HIDDEN 对 OBJ_LABEL 有效，继续用 HIDDEN
 void ApplyHidden()
   {
    int total = ObjectsTotal(0, -1, -1);
@@ -418,12 +437,18 @@ void ApplyHidden()
       string name = ObjectName(0, i, -1, -1);
       if(StringFind(name, g_prefix) != 0) continue;   // 仅本实例对象
       bool hide = g_hidden && (name != hideObj);       // HIDE 按钮自身永远显示
-      if(ObjectGetInteger(0, name, OBJPROP_TYPE, 0) == OBJ_BUTTON)
+      int type = (int)ObjectGetInteger(0, name, OBJPROP_TYPE, 0);
+      if(type == OBJ_BUTTON)
         {
          if(hide) ObjectSetInteger(0, name, OBJPROP_XDISTANCE, -10000);  // 移出屏幕
          // 显示状态不处理：位置由 RefreshAll 中的定位函数重新设置
         }
-      else
+      else if(type == OBJ_HLINE)
+        {
+         if(hide) ObjectSetDouble(0, name, OBJPROP_PRICE, 1e20);  // 移到屏幕上方之外
+         // 显示状态：UpdateLabel 会把 g_p1/g_p0/g_p79/g_p49 写回
+        }
+      else  // OBJ_LABEL / OBJ_TEXT 等
         {
          ObjectSetInteger(0, name, OBJPROP_HIDDEN, hide);
         }
@@ -456,9 +481,7 @@ void RefreshAll()
    UpdateTopButtons();
    UpdateBottomButtons();
 
-   UpdateLabelRight(LName(RATIO_100), g_p1, "1.00");
-   UpdateLabelRight(LName(RATIO_000), g_p0, "0.00");
-   UpdateLabelRight(LName(RATIO_021), TheoPrice(RATIO_021, g_p1, g_p0), "0.21");
+   UpdateLabelRight(LName(RATIO_021), TheoPrice(RATIO_021, g_p1, g_p0), "0.21");  // v1.07：仅保留 0.21 标签
 
    ApplyHidden();
    ChartRedraw(0);
@@ -802,6 +825,7 @@ void CycleRisk()
    g_riskPercent = g_riskValues[idx];
    SaveState();
    Print("[FibLimitAssist] 风险档位切换为 ", DoubleToString(g_riskPercent, 1), "%");
+   RefreshAll();   // v1.07：刷新按钮文字 + 三档配色（之前忘记调用，文字不变）
   }
 
 // 切换隐藏/显示
@@ -923,15 +947,56 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
      }
    else if(id == CHARTEVENT_OBJECT_CLICK)
      {
-      if(sparam == SwapName())          { DoSwap();            return; }
-      if(sparam == CancelPendingName()) { CancelAllPending();  return; }
-      if(sparam == CloseAllName())      { CloseAllPositions(); return; }
-      if(sparam == CloseHalfName())     { CloseHalfPositions();return; }
-      if(sparam == RiskName())          { CycleRisk();         return; }
-      if(sparam == MarketName())        { PlaceMarketOrder();  return; }
-      if(sparam == HideName())          { ToggleHide();        return; }
+      // v1.07：除 HIDE 外，所有"动作型"按钮处理后立即弹起 (STATE=false)
+      // HIDE 保留 sticky 行为：按下表示当前隐藏中 (由 UpdateHideButton 同步设置)
+      if(sparam == SwapName())
+        {
+         DoSwap();
+         ObjectSetInteger(0, SwapName(), OBJPROP_STATE, false);
+         return;
+        }
+      if(sparam == CancelPendingName())
+        {
+         CancelAllPending();
+         ObjectSetInteger(0, CancelPendingName(), OBJPROP_STATE, false);
+         return;
+        }
+      if(sparam == CloseAllName())
+        {
+         CloseAllPositions();
+         ObjectSetInteger(0, CloseAllName(), OBJPROP_STATE, false);
+         return;
+        }
+      if(sparam == CloseHalfName())
+        {
+         CloseHalfPositions();
+         ObjectSetInteger(0, CloseHalfName(), OBJPROP_STATE, false);
+         return;
+        }
+      if(sparam == RiskName())
+        {
+         CycleRisk();
+         // CycleRisk 内部已 RefreshAll -> UpdateRiskButton，无需单独弹起
+         return;
+        }
+      if(sparam == MarketName())
+        {
+         PlaceMarketOrder();
+         ObjectSetInteger(0, MarketName(), OBJPROP_STATE, false);
+         return;
+        }
+      if(sparam == HideName())
+        {
+         ToggleHide();   // UpdateHideButton 会根据 g_hidden 同步设置 STATE
+         return;
+        }
       double r = RatioOfButton(sparam);
-      if(r > 0) PlaceOrder(r);
+      if(r > 0)
+        {
+         PlaceOrder(r);
+         // 0.79/0.49 挂单按钮也立即弹起
+         ObjectSetInteger(0, BName(r), OBJPROP_STATE, false);
+        }
      }
    else if(id == CHARTEVENT_CHART_CHANGE)
      {

@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.05"
+#property version   "1.06"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -246,10 +246,10 @@ void CreateObjects()
    CreateButton(BName(RATIO_049));
    CreateSwapButton();
    CreateActionButton(CancelPendingName(), 100, "CANCEL",       C'120,120,120', "取消账户内全部挂单（含手动单）");
-   CreateActionButton(CloseAllName(),      100, "CLOSE ALL",    C'200,120,20',  "平掉账户内全部持仓（不涉及挂单）");
-   CreateActionButton(CloseHalfName(),     100, "CLOSE HALF",   C'230,140,40',  "按手数砍半平仓（账户全部品种）；若砍半后 < 最小手数则全平该仓位");
+   CreateActionButton(CloseAllName(),      110, "CLOSE ALL",    C'200,120,20',  "平掉账户内全部持仓（不涉及挂单）");
+   CreateActionButton(CloseHalfName(),     130, "CLOSE HALF",   C'230,140,40',  "按手数砍半平仓（账户全部品种）；若砍半后 < 最小手数则全平该仓位");
    CreateActionButton(RiskName(),           80, "",              C'90,90,90',   "点击循环切换单笔风险档位：0.5% → 1% → 2% → 0.5%");
-   CreateActionButton(MarketName(),         80, "MARKET",        C'140,140,140',"市价下单（止损 = 1.00 ± Range×1%，盈亏比 1:1）");
+   CreateActionButton(MarketName(),        110, "MARKET",        C'140,140,140',"市价下单（止损 = 1.00 ± Range×1%，盈亏比 1:1）");
    CreateActionButton(HideName(),           80, "HIDE",          C'60,60,60',   "隐藏/显示 EA 全部线条与按钮（此按钮自身始终显示）");
 
    CreateLabelRight(LName(RATIO_100), "1.00", CLR_END);
@@ -327,13 +327,15 @@ void UpdateTopButtons()
      }
   }
 
-// 最下面那根线左侧三个按钮：HIDE (80) | RISK (80) | MARKET (80)，左对齐 X=10 起步
-void UpdateBottomLeftButtons()
+// 最下面那根线的全部按钮：
+// 左侧 HIDE(80) | RISK(80)；中间 MARKET(110) 水平居中；右侧 CLOSE_HALF(130) | CLOSE_ALL(110) 右对齐 g_btnX+200
+void UpdateBottomButtons()
   {
    double botPrice = MathMin(g_p1, g_p0);
    int x = 0, y = 0;
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), botPrice, x, y)) return;
    int yBtn = y - 26; if(yBtn < 0) yBtn = 0;
+   int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
 
    string hideName = HideName();
    if(ObjectFind(0, hideName) >= 0)
@@ -350,30 +352,20 @@ void UpdateBottomLeftButtons()
    string marketName = MarketName();
    if(ObjectFind(0, marketName) >= 0)
      {
-      ObjectSetInteger(0, marketName, OBJPROP_XDISTANCE, 10 + 80 + 4 + 80 + 4);
+      ObjectSetInteger(0, marketName, OBJPROP_XDISTANCE, (w - 110) / 2);
       ObjectSetInteger(0, marketName, OBJPROP_YDISTANCE, yBtn);
      }
-  }
-
-// 最下面那根线右侧两个按钮：CLOSE_HALF (100) | 间隔 4 | CLOSE_ALL (100)，右边缘对齐 g_btnX+200
-void UpdateBottomRightButtons()
-  {
-   double botPrice = MathMin(g_p1, g_p0);
-   int x = 0, y = 0;
-   if(!ChartTimePriceToXY(0, 0, RightAnchor(), botPrice, x, y)) return;
-   int yBtn = y - 26; if(yBtn < 0) yBtn = 0;
-
    string closeAllName = CloseAllName();
    if(ObjectFind(0, closeAllName) >= 0)
      {
-      ObjectSetInteger(0, closeAllName, OBJPROP_XDISTANCE, g_btnX + 200 - 100);
+      ObjectSetInteger(0, closeAllName, OBJPROP_XDISTANCE, g_btnX + 200 - 110);
       ObjectSetInteger(0, closeAllName, OBJPROP_YDISTANCE, yBtn);
      }
    string closeHalfName = CloseHalfName();
    if(ObjectFind(0, closeHalfName) >= 0)
      {
-      // CLOSE_HALF 在 CLOSE_ALL 左侧：右边 = CLOSE_ALL 左边 - 4 = g_btnX + 200 - 100 - 4 = g_btnX + 96
-      ObjectSetInteger(0, closeHalfName, OBJPROP_XDISTANCE, g_btnX + 200 - 100 - 4 - 100);
+      // CLOSE_HALF 在 CLOSE_ALL 左侧：右边 = CLOSE_ALL 左边 - 4 = g_btnX + 200 - 110 - 4
+      ObjectSetInteger(0, closeHalfName, OBJPROP_XDISTANCE, g_btnX + 200 - 110 - 4 - 130);
       ObjectSetInteger(0, closeHalfName, OBJPROP_YDISTANCE, yBtn);
      }
   }
@@ -397,7 +389,11 @@ void UpdateRiskButton()
   {
    string name = RiskName();
    if(ObjectFind(0, name) < 0) return;
-   ObjectSetString(0, name, OBJPROP_TEXT, "RISK " + DoubleToString(g_riskPercent, 1) + "%");
+   string s = DoubleToString(g_riskPercent, 1);
+   int dot = StringFind(s, ".");
+   if(dot >= 0 && StringSubstr(s, dot + 1) == "0")   // 去掉末尾 ".0"，如 1.0 → 1
+      s = StringSubstr(s, 0, dot);
+   ObjectSetString(0, name, OBJPROP_TEXT, s + "%");
   }
 
 // 市价按钮文字与颜色：按当前方向显示 BUY MKT / SELL MKT，FLAT 时显示 --
@@ -412,6 +408,7 @@ void UpdateMarketButton(int dir)
   }
 
 // 应用隐藏/显示状态：遍历所有 EA 对象，HIDE 按钮自身除外
+// 注意：OBJ_BUTTON 的 OBJPROP_HIDDEN 在部分 MT5 版本无效，改为移出屏幕隐藏；线/标签用 OBJPROP_HIDDEN
 void ApplyHidden()
   {
    int total = ObjectsTotal(0, -1, -1);
@@ -421,7 +418,15 @@ void ApplyHidden()
       string name = ObjectName(0, i, -1, -1);
       if(StringFind(name, g_prefix) != 0) continue;   // 仅本实例对象
       bool hide = g_hidden && (name != hideObj);       // HIDE 按钮自身永远显示
-      ObjectSetInteger(0, name, OBJPROP_HIDDEN, hide);
+      if(ObjectGetInteger(0, name, OBJPROP_TYPE, 0) == OBJ_BUTTON)
+        {
+         if(hide) ObjectSetInteger(0, name, OBJPROP_XDISTANCE, -10000);  // 移出屏幕
+         // 显示状态不处理：位置由 RefreshAll 中的定位函数重新设置
+        }
+      else
+        {
+         ObjectSetInteger(0, name, OBJPROP_HIDDEN, hide);
+        }
      }
   }
 
@@ -449,8 +454,7 @@ void RefreshAll()
    UpdateRiskButton();
    UpdateHideButton();
    UpdateTopButtons();
-   UpdateBottomLeftButtons();
-   UpdateBottomRightButtons();
+   UpdateBottomButtons();
 
    UpdateLabelRight(LName(RATIO_100), g_p1, "1.00");
    UpdateLabelRight(LName(RATIO_000), g_p0, "0.00");
@@ -804,7 +808,7 @@ void CycleRisk()
 void ToggleHide()
   {
    g_hidden = !g_hidden;
-   ApplyHidden();
+   RefreshAll();   // 重新定位 + 更新 HIDE/SHOW 文字 + 应用隐藏
    Print("[FibLimitAssist] 隐藏状态切换为 ", g_hidden ? "HIDE" : "SHOW");
   }
 

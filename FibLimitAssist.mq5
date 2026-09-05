@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.13"
+#property version   "1.15"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -140,23 +140,16 @@ int LeftShift()
 
 //---------------------------- 状态持久化 ---------------------------//
 // 使用非临时全局变量：会话内(切换周期/缩放)保留，MT5 重启后自动清空
-void SaveState()
+// v1.15: 1.00/0.00/0.79/0.49 位置不再记忆, 每次插入完全重新初始化
+//        仅保留风险档位 (g_riskPercent) 会话内持久
+void SaveRisk()
   {
-   GlobalVariableSet(g_prefix + "p1",  g_p1);
-   GlobalVariableSet(g_prefix + "p0",  g_p0);
-   GlobalVariableSet(g_prefix + "p79", g_p79);
-   GlobalVariableSet(g_prefix + "p49", g_p49);
    GlobalVariableSet(g_prefix + "risk", g_riskPercent);
   }
-bool LoadState()
+bool LoadRisk()
   {
-   if(!GlobalVariableCheck(g_prefix + "p1")) return false;
-   g_p1  = GlobalVariableGet(g_prefix + "p1");
-   g_p0  = GlobalVariableGet(g_prefix + "p0");
-   g_p79 = GlobalVariableGet(g_prefix + "p79");
-   g_p49 = GlobalVariableGet(g_prefix + "p49");
-   if(GlobalVariableCheck(g_prefix + "risk"))
-      g_riskPercent = GlobalVariableGet(g_prefix + "risk");
+   if(!GlobalVariableCheck(g_prefix + "risk")) return false;
+   g_riskPercent = GlobalVariableGet(g_prefix + "risk");
    return true;
   }
 
@@ -1420,8 +1413,7 @@ void DoAdjust()
    g_p1 = NormalizeDouble(pH, _Digits);   // 1.00 = 最近高点
    g_p0 = NormalizeDouble(pL, _Digits);   // 0.00 = 最近低点
 
-   // 5. 保存到全局变量 (会话内有效, 重启 MT5 后回到默认)
-   SaveState();
+   // 5. v1.15: 端点位置不再记忆, 这里无需保存 (下次插入会重新初始化)
 
    // 6. 重画
    RefreshAll();
@@ -1458,7 +1450,7 @@ void CycleRisk()
      }
    idx = (idx + 1) % ArraySize(g_riskValues);
    g_riskPercent = g_riskValues[idx];
-   SaveState();
+   SaveRisk();
    Print("[FibLimitAssist] 风险档位切换为 ", DoubleToString(g_riskPercent, 1), "%");
    RefreshAll();   // v1.07：刷新按钮文字 + 三档配色（之前忘记调用，文字不变）
   }
@@ -1506,7 +1498,7 @@ void ApplyDrag(double r, double price)
    else if(r == RATIO_049) g_p49 = price;
    else return;
 
-   SaveState();
+   // v1.15: 端点/挂单线位置不再记忆, 无需保存
    RefreshAll();
   }
 
@@ -1518,35 +1510,36 @@ void DoSwap()
    g_p0 = t;
    g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
    g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
-   SaveState();
+   // v1.15: 端点位置不再记忆, 无需保存
    RefreshAll();
   }
 
 //---------------------------- 生命周期 -----------------------------//
 int OnInit()
   {
-   g_prefix = "FLA_" + IntegerToString(ChartID()) + "_" + _Symbol + "_";
+   // v1.15: prefix 增加 _Period, 减少 MT5 ChartID 复用导致的跨周期状态串扰
+   g_prefix = "FLA_" + IntegerToString(ChartID()) + "_" + _Symbol + "_" + EnumToString(_Period) + "_";
 
    // v1.12: 自动探测服务器时区 (用于 CE(S)T 切日换算)
    DetectTimezone();
 
-   if(!LoadState())
+   // v1.15: 1.00/0.00 端点位置不再记忆, 每次插入都用当前可见价格区间重新生成默认 fib
+   double pmax = ChartGetDouble(0, CHART_PRICE_MAX, 0);
+   double pmin = ChartGetDouble(0, CHART_PRICE_MIN, 0);
+   if(pmax <= pmin || pmin <= 0)
      {
-      // 首次附加：用当前可见价格区间生成默认斐波那契
-      double pmax = ChartGetDouble(0, CHART_PRICE_MAX, 0);
-      double pmin = ChartGetDouble(0, CHART_PRICE_MIN, 0);
-      if(pmax <= pmin || pmin <= 0)
-        {
-         pmax = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         pmin = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         if(pmax <= pmin) { double c = pmin; pmax = c + 100 * _Point; pmin = c - 100 * _Point; }
-        }
-      double span = pmax - pmin;
-      g_p1  = pmin + span * 0.1;
-      g_p0  = pmax - span * 0.1;
-      g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
-      g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
+      pmax = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      pmin = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      if(pmax <= pmin) { double c = pmin; pmax = c + 100 * _Point; pmin = c - 100 * _Point; }
      }
+   double span = pmax - pmin;
+   g_p1  = pmin + span * 0.1;
+   g_p0  = pmax - span * 0.1;
+   g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
+   g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
+
+   // 风险档位会话内持久
+   LoadRisk();
 
    CreateObjects();
    g_lastBalance = AccountInfoDouble(ACCOUNT_BALANCE);

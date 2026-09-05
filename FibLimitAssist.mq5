@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.15"
+#property version   "1.16"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -1409,9 +1409,14 @@ void DoAdjust()
       return;
      }
 
-   // 4. 改全局变量 (其余 0.21/0.49/0.79 由 RefreshAll 通过 TheoPrice 自动重画)
+   // 4. 改全局变量: 1.00 / 0.00 按新高低点
    g_p1 = NormalizeDouble(pH, _Digits);   // 1.00 = 最近高点
    g_p0 = NormalizeDouble(pL, _Digits);   // 0.00 = 最近低点
+
+   // 端点变了 → 0.49 / 0.79 立即回归理论值 (与 ApplyDrag 拖动端点行为一致).
+   // 否则 g_p79/g_p49 残留的手调值会让按钮停在旧位置.
+   g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
+   g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
 
    // 5. v1.15: 端点位置不再记忆, 这里无需保存 (下次插入会重新初始化)
 

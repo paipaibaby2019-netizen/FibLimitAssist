@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.23"
+#property version   "1.24"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -12,6 +12,7 @@
 #property description "· MKT 按钮两侧实时显示持仓浮盈 + 当日累计盈亏"
 #property description "· EVEN 按钮统一把任意持仓调到入场价平仓（盈改 SL，亏改 TP）"
 #property description "· ADJUST 按钮一键把 1.00/0.00 调整到图表最近的高低点 (v1.13)"
+#property description "· 1.00/0.79/0.49/0.00 各一对 STEP 按钮微调单线, 双击=×10 加速 (v1.17, v1.24 浅灰配色)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -63,6 +64,10 @@ input double InpStepPercent  = 1.0; // [STEP] 单击移动步长占 swing 区间
 #define CLR_PLUS        C'0,150,60'   // 盈利（绿，带 +）
 #define CLR_MINUS       C'220,0,0'    // 亏损（红，带 -）
 #define CLR_PNL_NEUTRAL C'140,140,140'// 盈亏为零（灰）
+
+// v1.24 新增：STEP 上下调整按钮配色 (浅灰背景 + 黑字, 区别于其他深色操作按钮, 视觉更轻)
+#define CLR_STEP_BG     C'200,200,200'// STEP 按钮底色（浅灰）
+#define CLR_STEP_TXT    clrBlack      // STEP 按钮文字（黑, ▲▼）
 
 //---------------------------- 方向枚举 -----------------------------//
 enum ENUM_DIR { DIR_FLAT = 0, DIR_UP = 1, DIR_DOWN = 2 };
@@ -448,8 +453,8 @@ bool CreateStepButton(double ratio, int dir)
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 7);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
-   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'70,70,70');
+   ObjectSetInteger(0, name, OBJPROP_COLOR, CLR_STEP_TXT);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, CLR_STEP_BG);
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetString(0, name, OBJPROP_FONT, "Arial");
    ObjectSetString(0, name, OBJPROP_TEXT, (dir > 0 ? "▲" : "▼"));

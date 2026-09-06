@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.19"
+#property version   "1.20"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -525,6 +525,9 @@ void UpdateStepButtons()
 //   0.00 (bot): UP   不能穿过 min(p79, p49); DOWN 可以进一步压低 bot
 //   0.79       : 在 p_top 和 0.49 之间
 //   0.49       : 在 p_bot 和 0.79 之间
+// v1.20: 撞 fib 边界时拒绝瞬移 — 保持 oldPrice 不动
+//   避免视觉上"瞬移到 0.79/0.49/1.00/0.00 位置" (单步 step 跨过整个剩余空间时尤其明显)
+//   用户多次小步点击慢慢靠近边界, 不会"瞬移"
 double ClampStepMove(double ratio, int dir, double step)
   {
    double oldPrice = LevelPrice(ratio);
@@ -538,27 +541,46 @@ double ClampStepMove(double ratio, int dir, double step)
      {
       // DOWN 限制: 不能低于 max(p79, p49)
       double minAllowed = MathMax(g_p79, g_p49) + margin;
-      if(dir < 0 && newPrice < minAllowed) newPrice = minAllowed;
+      if(dir < 0 && newPrice < minAllowed)
+        {
+         // 撞边界: 拒绝瞬移, 保持 oldPrice
+         return oldPrice;
+        }
       // UP 不限制
      }
    else if(ratio == RATIO_000)
      {
       // UP 限制: 不能高于 min(p79, p49)
       double maxAllowed = MathMin(g_p79, g_p49) - margin;
-      if(dir > 0 && newPrice > maxAllowed) newPrice = maxAllowed;
+      if(dir > 0 && newPrice > maxAllowed)
+        {
+         return oldPrice;
+        }
       // DOWN 不限制
      }
    else if(ratio == RATIO_079)
      {
       // 0.79 必须在 (p_bot, p_top) 之间, 且 >= 0.49
-      if(dir > 0 && newPrice > p_top - margin) newPrice = p_top - margin;
-      if(dir < 0 && newPrice < g_p49 + margin) newPrice = g_p49 + margin;
+      if(dir > 0 && newPrice > p_top - margin)
+        {
+         return oldPrice;
+        }
+      if(dir < 0 && newPrice < g_p49 + margin)
+        {
+         return oldPrice;
+        }
      }
    else if(ratio == RATIO_049)
      {
       // 0.49 必须在 (p_bot, p_top) 之间, 且 <= 0.79
-      if(dir > 0 && newPrice > g_p79 - margin) newPrice = g_p79 - margin;
-      if(dir < 0 && newPrice < p_bot + margin) newPrice = p_bot + margin;
+      if(dir > 0 && newPrice > g_p79 - margin)
+        {
+         return oldPrice;
+        }
+      if(dir < 0 && newPrice < p_bot + margin)
+        {
+         return oldPrice;
+        }
      }
 
    return newPrice;

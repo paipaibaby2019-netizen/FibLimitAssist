@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.25"
+#property version   "1.26"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -14,6 +14,7 @@
 #property description "· ADJUST 按钮一键把 1.00/0.00 调整到图表最近的高低点 (v1.13)"
 #property description "· 1.00/0.79/0.49/0.00 各一对 STEP 按钮微调单线, 双击=×10 加速 (v1.17, v1.24 浅灰配色)"
 #property description "· HIDE 按钮改浅灰底 (与 CANCEL 同色, v1.25); EVEN/CHALF/CALL 等距 4px (v1.25); 0.79/0.49 线随方向变色 (long 绿/short 红, v1.25)"
+#property description "· SWAP/ADJUST/CANCEL 三个按钮统一放最上面线下方 4px (v1.26, 不再被线穿过)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -423,16 +424,18 @@ void UpdateSwapButton(int dir)
    color bg = (dir == DIR_UP) ? CLR_BUY_BG : ((dir == DIR_DOWN) ? CLR_SELL_BG : CLR_FLAT_BG);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
 
-   // v1.08b：水平居中 + 垂直放到最上面那根线（MathMax(p1,p0)）中点
+   // v1.08b：水平居中 + 垂直放到最上面那根线（MathMax(p1,p0)）下方 4px
+   // v1.26: 由 y-11 (线穿过按钮) 改为 y+4 (按钮位于线下方, 不被线穿过)
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
    int x = 0, y = 0;
    double topPrice = MathMax(g_p1, g_p0);
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - 80) / 2);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 11);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y + 4);
   }
 
-// v1.13: ADJUST 按钮位置 (在 SWAP 右侧 4px, 同样在"最上面那根线"中点上方 11px)
+// v1.13: ADJUST 按钮位置 (在 SWAP 右侧 4px)
+// v1.26: Y 改 y+4 (SWAP/ADJUST/CANCEL 三个按钮统一在 topPrice 线下方 4px, 不被线穿过)
 void UpdateAdjustButton()
   {
    string name = AdjustName();
@@ -443,7 +446,7 @@ void UpdateAdjustButton()
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
    // SWAP 位置 = (w-80)/2, ADJUST 宽 80, 间距 4 → ADJUST 左 X = SWAP 左 X + SWAP 宽 + 4
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - 80) / 2 + 84);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 11);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y + 4);
   }
 
 //+------------------------------------------------------------------+
@@ -665,13 +668,14 @@ void ApplyStepDrag(double r, double price)
    RefreshAll();
   }
 
-// 最上面那根线右侧：仅 CANCEL 按钮（v1.07：SWAP 已移到线段中点）
+// 最上面那根线右侧：CANCEL 按钮
+// v1.26: 改到线下方 (y+4), 与 SWAP/ADJUST 三个按钮统一在 topPrice 线下方 4px, 不被线穿过
 void UpdateTopButtons()
   {
    double topPrice = MathMax(g_p1, g_p0);
    int x = 0, y = 0;
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
-   int yBtn = y - 26; if(yBtn < 0) yBtn = 0;
+   int yBtn = y + 4;
 
    string cancelName = CancelPendingName();
    if(ObjectFind(0, cancelName) >= 0)

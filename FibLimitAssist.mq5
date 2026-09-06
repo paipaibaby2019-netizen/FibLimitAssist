@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.22"
+#property version   "1.23"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -528,11 +528,14 @@ void UpdateStepButtons()
 
 // 计算给定 ratio 和方向的"目标价格" — 在 fib 顺序约束下
 //   1.00 / 0.00 (端点): 完全自由 — 用户主动设的边界, 可以推开挂单线
-//   0.79              : 在 [botPrice, topPrice] 区间内, 且 >= 0.49 + margin
-//   0.49              : 在 [botPrice, topPrice] 区间内, 且 <= 0.79 - margin
-// v1.21: 端点 1.00/0.00 完全自由 (v1.21 commit 只加了 PlaySound, 此处为 v1.22 真正放开)
-// v1.22: 用 topPrice/botPrice 判定 0.79/0.49 撞视觉高端/低端 — long/short 自适应
-//   撞 fib 边界时仍 return oldPrice, ApplyStepButton 会 PlaySound 反馈
+//   0.79 / 0.49 (挂单线): 不能跨过对方, 也不能跨过顶/底端点
+// v1.23: 修复 long 模式下 fib 系数反转问题
+//   fib 系数 0.79 永远比 0.49 更靠近 1.00 端点, 因此:
+//   - Long 模式 (1.00 在底, 默认插入): 0.79 < 0.49 数值, 0.79 在底部, 0.49 在中部
+//   - Short 模式 (1.00 在顶, 按 SWAP): 0.79 > 0.49 数值, 0.79 在顶部, 0.49 在中部
+//   旧代码按 ratio 写死 0.79/0.49 的数值关系 (假设 0.79 > 0.49 即 short 模式),
+//   long 模式下约束条件几乎永远触发, 导致 0.79 DOWN / 0.49 UP 失灵
+//   改用 upperLine/lowerLine 按视觉位置判定 — long/short 都能正常工作
 double ClampStepMove(double ratio, int dir, double step)
   {
    double oldPrice = LevelPrice(ratio);
@@ -546,19 +549,26 @@ double ClampStepMove(double ratio, int dir, double step)
    if(ratio == RATIO_100 || ratio == RATIO_000)
       return newPrice;
 
-   if(ratio == RATIO_079)
+   // v1.23: 0.79 / 0.49 互撞按视觉位置自适应 — long/short 都能正常工作
+   double upperLine = MathMax(g_p79, g_p49);   // 视觉上更靠近 topPrice 的线 (不论 long/short)
+   double lowerLine = MathMin(g_p79, g_p49);   // 视觉上更靠近 botPrice 的线
+
+   if(ratio == RATIO_079 || ratio == RATIO_049)
      {
-      // 0.79 必须在 [botPrice, topPrice] 区间内, 且 >= 0.49
-      //   v1.22: UP 不能越过视觉高端 (topPrice), DOWN 不能越过 0.49
-      if(dir > 0 && newPrice > topPrice)        return oldPrice;
-      if(dir < 0 && newPrice < g_p49 + margin)  return oldPrice;
-     }
-   else if(ratio == RATIO_049)
-     {
-      // 0.49 必须在 [botPrice, topPrice] 区间内, 且 <= 0.79
-      //   v1.22: UP 不能越过 0.79, DOWN 不能越过视觉低端 (botPrice)
-      if(dir > 0 && newPrice > g_p79 - margin)  return oldPrice;
-      if(dir < 0 && newPrice < botPrice)        return oldPrice;
+      // 当前线在视觉上是 upper 还是 lower?
+      bool isUpper = (ratio == RATIO_079) ? (g_p79 >= g_p49) : (g_p49 >= g_p79);
+      if(isUpper)
+        {
+         // 上方线 (视觉靠近顶): UP 受限于 topPrice, DOWN 受限于下方线
+         if(dir > 0 && newPrice > topPrice - margin)  return oldPrice;
+         if(dir < 0 && newPrice < lowerLine + margin) return oldPrice;
+        }
+      else
+        {
+         // 下方线 (视觉靠近底): UP 受限于上方线, DOWN 受限于 botPrice
+         if(dir > 0 && newPrice > upperLine - margin) return oldPrice;
+         if(dir < 0 && newPrice < botPrice + margin)  return oldPrice;
+        }
      }
 
    return newPrice;

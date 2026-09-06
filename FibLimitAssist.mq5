@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.24"
+#property version   "1.25"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -13,6 +13,7 @@
 #property description "· EVEN 按钮统一把任意持仓调到入场价平仓（盈改 SL，亏改 TP）"
 #property description "· ADJUST 按钮一键把 1.00/0.00 调整到图表最近的高低点 (v1.13)"
 #property description "· 1.00/0.79/0.49/0.00 各一对 STEP 按钮微调单线, 双击=×10 加速 (v1.17, v1.24 浅灰配色)"
+#property description "· HIDE 按钮改浅灰底 (与 CANCEL 同色, v1.25); EVEN/CHALF/CALL 等距 4px (v1.25); 0.79/0.49 线随方向变色 (long 绿/short 红, v1.25)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -48,14 +49,15 @@ input double InpStepPercent  = 1.0; // [STEP] 单击移动步长占 swing 区间
 
 //---------------------------- 颜色定义 -----------------------------//
 #define CLR_END      C'90,90,90'     // 端点 1.00 / 0.00 线
-#define CLR_MID      C'0,140,220'    // 0.79 / 0.49 线
+// v1.25 删除 CLR_MID：0.79/0.49 线颜色改为随方向动态变化 (DIR_UP→CLR_BUY_BG 绿, DIR_DOWN→CLR_SELL_BG 红, DIR_FLAT→CLR_FLAT_BG 灰), 由 RefreshAll 同步
 #define CLR_DECO     C'115,115,115'  // 0.21 装饰线（加深，避免看不清）
-#define CLR_BUY_BG   C'76,175,80'    // 买单按钮底色
-#define CLR_SELL_BG  C'244,67,54'    // 卖单按钮底色
-#define CLR_FLAT_BG  C'140,140,140'  // 方向未定义按钮底色
+#define CLR_BUY_BG   C'76,175,80'    // 买单按钮底色 (+0.79/0.49 线 long 态)
+#define CLR_SELL_BG  C'244,67,54'    // 卖单按钮底色 (+0.79/0.49 线 short 态)
+#define CLR_FLAT_BG  C'140,140,140'  // 方向未定义按钮底色 (+0.79/0.49 线未方向态)
 // v1.07 新增：HIDE/SHOW 状态色 + RISK 三档色
-#define CLR_HIDE_OFF C'60,60,60'     // SHOW 状态：当前显示（深灰）
-#define CLR_HIDE_ON  C'200,120,20'   // HIDE 状态：当前隐藏（橙黄警示）
+// v1.25 调整：HIDE 按钮改为浅灰底（与 CANCEL 按钮同色 C'120,120,120'），仅 HIDE 态保留橙黄警示
+#define CLR_HIDE_OFF C'120,120,120'  // SHOW 状态：当前显示（浅灰，与 CANCEL 一致）
+#define CLR_HIDE_ON  C'200,120,20'   // HIDE 状态：当前隐藏（橙黄警示，仍保留）
 #define CLR_RISK_LOW C'76,175,80'    // RISK 0.5% 低风险（绿）
 #define CLR_RISK_MID C'255,193,7'    // RISK 1%   中风险（黄）
 #define CLR_RISK_HI  C'244,67,54'    // RISK 2%   高风险（红）
@@ -321,8 +323,8 @@ void CreateObjects()
   {
    CreateHLine(HName(RATIO_100), g_p1,  true,  CLR_END,  STYLE_SOLID, 2);
    CreateHLine(HName(RATIO_000), g_p0,  true,  CLR_END,  STYLE_SOLID, 2);
-   CreateHLine(HName(RATIO_079), g_p79, true,  CLR_MID,  STYLE_SOLID, 1);
-   CreateHLine(HName(RATIO_049), g_p49, true,  CLR_MID,  STYLE_SOLID, 1);
+   CreateHLine(HName(RATIO_079), g_p79, true,  CLR_FLAT_BG, STYLE_SOLID, 1);
+   CreateHLine(HName(RATIO_049), g_p49, true,  CLR_FLAT_BG, STYLE_SOLID, 1);
    CreateHLine(HName(RATIO_021), TheoPrice(RATIO_021, g_p1, g_p0), false, CLR_DECO, STYLE_DASHDOT, 1);
 
    CreateButton(BName(RATIO_079));
@@ -335,7 +337,7 @@ void CreateObjects()
    CreateActionButton(EvenName(),           80, "EVEN",          C'60,120,200',  "一键入场价（仅当前品种）：盈利仓位SL改到入场；亏损仓位TP改到入场（保本平仓）");
    CreateActionButton(RiskName(),           80, "",              C'90,90,90',   "点击循环切换单笔风险档位：0.5% → 1% → 2% → 0.5%");
    CreateActionButton(MarketName(),        110, "MARKET",        C'140,140,140',"市价下单（止损 = 1.00 ± Range×1%，盈亏比 1:1）");
-   CreateActionButton(HideName(),           80, "HIDE",          C'60,60,60',   "隐藏/显示 EA 全部线条与按钮（此按钮自身始终显示）");
+   CreateActionButton(HideName(),           80, "HIDE",          CLR_HIDE_OFF,   "隐藏/显示 EA 全部线条与按钮（此按钮自身始终显示）");
 
    // v1.08：MKT 两侧的实时盈亏数字标签（OBJ_LABEL 像素定位）
    CreatePnLLabel(PnLLeftName());
@@ -364,8 +366,8 @@ void UpdateButtonX()
   {
    // v1.08：g_btnX = 最右边 CALL 按钮的左 X（CALL 宽 100，右边距 8）
    //  · 0.79/0.49 挂单按钮：宽 120，左 X = g_btnX - 20（右边缘与 CALL/CANCEL 右边缘对齐 = w-8）
-   //  · EVEN 按钮：宽 80，左 X = g_btnX - 208
    //  · CHALF 按钮：宽 100，左 X = g_btnX - 104
+   //  · EVEN 按钮：宽 80，左 X = g_btnX - 188（v1.25 右移，与 CHALF/CALL 间距统一为 4px）
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
    g_btnX = w - 108;
    if(g_btnX < 0) g_btnX = 0;
@@ -383,6 +385,17 @@ void UpdateButton(string name, double price, string text, int dir)
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    color bg = (dir == DIR_UP) ? CLR_BUY_BG : ((dir == DIR_DOWN) ? CLR_SELL_BG : CLR_FLAT_BG);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
+  }
+// v1.25: 0.79/0.49 挂单线颜色随方向动态 (long=绿, short=红, flat=灰), 与按钮配色统一
+void UpdateMidLines(int dir)
+  {
+   color clr = (dir == DIR_UP) ? CLR_BUY_BG : ((dir == DIR_DOWN) ? CLR_SELL_BG : CLR_FLAT_BG);
+   string n79 = HName(RATIO_079);
+   string n49 = HName(RATIO_049);
+   if(ObjectFind(0, n79) >= 0)
+      ObjectSetInteger(0, n79, OBJPROP_COLOR, clr);
+   if(ObjectFind(0, n49) >= 0)
+      ObjectSetInteger(0, n49, OBJPROP_COLOR, clr);
   }
 void UpdateLabel(string name, double price)
   {
@@ -671,6 +684,7 @@ void UpdateTopButtons()
 
 // 最下面那根线的全部按钮 (v1.08)：
 //  左侧：HIDE(80) | RISK(80) | ...空隙... | PL_LEFT(标签) | MARKET(110 居中) | PL_RIGHT(标签) | ...空隙... | EVEN(80) | CHALF(100) | CALL(100)
+//  右侧等距（v1.25）：EVEN(80) | gap 4px | CHALF(100) | gap 4px | CALL(100)  → 三个按钮视觉间距一致
 void UpdateBottomButtons()
   {
    double botPrice = MathMin(g_p1, g_p0);
@@ -739,7 +753,7 @@ void UpdateBottomButtons()
      }
    if(ObjectFind(0, EvenName()) >= 0)
      {
-      ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, g_btnX - 100 - 4 - 100 - 4);
+      ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, g_btnX - 100 - 4 - 80 - 4);  // v1.25: g_btnX-188, 与 CHALF/CALL 等距 4px
       ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yBtn);
      }
   }
@@ -843,6 +857,7 @@ void RefreshAll()
 
    UpdateButton(BName(RATIO_079), price79, BuildButtonText(ActualRatio(price79), lot79), dir);
    UpdateButton(BName(RATIO_049), price49, BuildButtonText(ActualRatio(price49), lot49), dir);
+   UpdateMidLines(dir);   // v1.25: 0.79/0.49 线颜色随方向 (与按钮配色统一)
 
    UpdateSwapButton(dir);
    UpdateAdjustButton();   // v1.13: ADJUST 按钮位置 (跟随 SWAP)

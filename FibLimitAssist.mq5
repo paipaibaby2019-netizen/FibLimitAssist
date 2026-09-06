@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.16"
+#property version   "1.17"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -34,6 +34,9 @@ input ENUM_DAY_RESET_TZ InpDayResetTimezone = DAY_TZ_CET_AUTO; // 日切时区 (
 input int InpAdjustDepth     = 12; // [ADJUST] 分形识别窗口 (左右各 N 根 bar, 类比 zigzag ExtDepth)
 input int InpAdjustDeviation = 5;   // [ADJUST] 候选与前一同向极值最小偏差 (单位:点, 类比 zigzag ExtDeviation)
 input int InpAdjustBackstep  = 3;   // [ADJUST] 候选最小时间距离 (单位:bar, 类比 zigzag ExtBackstep, 用于替换紧挨假信号)
+
+// v1.17 新增: 1.00/0.00/0.79/0.49 线上 UP/DOWN 按钮 - 单击步长 = swing 区间 × (InpStepPercent)%, 双击 ×10
+input double InpStepPercent  = 1.0; // [STEP] 单击移动步长占 swing 区间百分比 (%); 双击同按钮 300ms 内 = ×10
 
 //---------------------------- 固定比例 -----------------------------//
 #define RATIO_100 1.00
@@ -83,6 +86,11 @@ bool     g_hidden = false;     // true=隐藏 EA 线条与按钮(HIDE 按钮自�
 //   由 (TimeCurrent() - TimeGMT()) 推断，如 broker 是 GMT+2 则 g_serverGMTOffset = +2
 //   仅用于 CE(S)T 切日换算
 int      g_serverGMTOffset = 0;
+
+// v1.17 新增: STEP 按钮双击检测 (MQL5 CHARTEVENT_OBJECT_CLICK 不带 shift 状态, 改用双击 = ×10 倍步长)
+string   g_lastStepName     = "";
+long     g_lastStepTimeMs   = 0;
+#define  STEP_DBLCLICK_MS   300
 
 //---------------------------- 工具函数 -----------------------------//
 // 对象命名：按比例生成唯一名称
@@ -232,6 +240,13 @@ string HideName()          { return g_prefix + "HIDE"; }
 // v1.13: 一键调整 1.00/0.00 到最近高低点的按钮对象名
 string AdjustName()        { return g_prefix + "ADJUST"; }
 
+// v1.17 新增: 4 条主线的 UP/DOWN 步进按钮对象名 (ratio=100/079/049/000, dir=+1/-1)
+string StepName(double ratio, int dir)
+  {
+   int rint = (int)MathRound(ratio * 100);
+   return g_prefix + "STEP_" + (dir > 0 ? "UP_" : "DN_") + IntegerToString(rint);
+  }
+
 bool CreateSwapButton()
   {
    string name = SwapName();
@@ -322,6 +337,8 @@ void CreateObjects()
    CreatePnLLabel(PnLRightName());
 
    CreateLabelRight(LName(RATIO_021), "0.21", CLR_DECO);
+
+   CreateStepButtons();   // v1.17: 1.00/0.79/0.49/0.00 各一对 UP/DOWN 按钮
   }
 
 // v1.08：盈亏数字标签（OBJ_LABEL 像素定位）
@@ -409,6 +426,182 @@ void UpdateAdjustButton()
    // SWAP 位置 = (w-80)/2, ADJUST 宽 80, 间距 4 → ADJUST 左 X = SWAP 左 X + SWAP 宽 + 4
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - 80) / 2 + 84);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 11);
+  }
+
+//+------------------------------------------------------------------+
+//| v1.17: STEP UP/DOWN 按钮 (1.00/0.00/0.79/0.49 各一对)
+//| 单击 = 移动区间比例 InpStepPercent%, 双击 300ms 内 = ×10
+//+------------------------------------------------------------------+
+#define STEP_BTN_W     22   // 按钮宽度
+#define STEP_BTN_H     18   // 按钮高度
+#define STEP_BTN_GAP   2    // UP/DOWN 之间的间距
+#define STEP_BTN_X     6    // 距图表左边距
+#define STEP_BTN_DN_OFFSET (STEP_BTN_W + STEP_BTN_GAP)
+
+bool CreateStepButton(double ratio, int dir)
+  {
+   string name = StepName(ratio, dir);
+   if(!ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0)) return false;
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, STEP_BTN_W);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, STEP_BTN_H);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 7);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'70,70,70');
+   ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetString(0, name, OBJPROP_FONT, "Arial");
+   ObjectSetString(0, name, OBJPROP_TEXT, (dir > 0 ? "▲" : "▼"));
+   string rstr = DoubleToString(ratio, 2);
+   string dirTxt = (dir > 0 ? "向上" : "向下");
+   ObjectSetString(0, name, OBJPROP_TOOLTIP,
+                   dirTxt + "移动 " + rstr + " 线 (单击=" +
+                   DoubleToString(InpStepPercent, 1) + "%, 双击=×10 加速)");
+   return true;
+  }
+
+bool CreateStepButtons()
+  {
+   bool ok = true;
+   double ratios[4] = {RATIO_100, RATIO_079, RATIO_049, RATIO_000};
+   for(int i = 0; i < 4; i++)
+     {
+      ok = CreateStepButton(ratios[i], +1) && ok;   // UP
+      ok = CreateStepButton(ratios[i], -1) && ok;   // DOWN
+     }
+   return ok;
+  }
+
+// 单个 STEP 按钮位置: X=左边缘, Y=对齐到该线当前 LevelPrice
+void UpdateStepButton(double ratio, int dir)
+  {
+   string name = StepName(ratio, dir);
+   if(ObjectFind(0, name) < 0) return;
+   double price = LevelPrice(ratio);
+   int x = 0, y = 0;
+   if(!ChartTimePriceToXY(0, 0, RightAnchor(), price, x, y)) return;
+   int btnY = y - STEP_BTN_H / 2;
+   // DOWN 在下, UP 在上, 中间间距 STEP_BTN_GAP, 共占 STEP_BTN_H*2 + GAP 高度
+   if(dir > 0)
+      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, btnY - STEP_BTN_H - STEP_BTN_GAP / 2);   // UP 在线之上
+   else
+      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, btnY + STEP_BTN_GAP / 2);                // DOWN 在线之下
+   // X 紧贴左侧间距, UP 在左, DOWN 在右
+   int xUp   = STEP_BTN_X;
+   int xDown = STEP_BTN_X + STEP_BTN_DN_OFFSET;
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (dir > 0 ? xUp : xDown));
+  }
+
+void UpdateStepButtons()
+  {
+   double ratios[4] = {RATIO_100, RATIO_079, RATIO_049, RATIO_000};
+   for(int i = 0; i < 4; i++)
+     {
+      UpdateStepButton(ratios[i], +1);
+      UpdateStepButton(ratios[i], -1);
+     }
+  }
+
+// 计算给定 ratio 和方向的"目标价格" — 在 fib 顺序约束下
+//   1.00 (top): DOWN 不能穿过 max(p79, p49); UP 可以进一步抬高 top
+//   0.00 (bot): UP   不能穿过 min(p79, p49); DOWN 可以进一步压低 bot
+//   0.79       : 在 p_top 和 0.49 之间
+//   0.49       : 在 p_bot 和 0.79 之间
+double ClampStepMove(double ratio, int dir, double step)
+  {
+   double oldPrice = LevelPrice(ratio);
+   double newPrice = oldPrice + dir * step;
+
+   double p_top = MathMax(g_p1, g_p0);
+   double p_bot = MathMin(g_p1, g_p0);
+   double margin = _Point;   // 留 1 个点的安全 gap, 避免 fab 关系"=="
+
+   if(ratio == RATIO_100)
+     {
+      // DOWN 限制: 不能低于 max(p79, p49)
+      double minAllowed = MathMax(g_p79, g_p49) + margin;
+      if(dir < 0 && newPrice < minAllowed) newPrice = minAllowed;
+      // UP 不限制
+     }
+   else if(ratio == RATIO_000)
+     {
+      // UP 限制: 不能高于 min(p79, p49)
+      double maxAllowed = MathMin(g_p79, g_p49) - margin;
+      if(dir > 0 && newPrice > maxAllowed) newPrice = maxAllowed;
+      // DOWN 不限制
+     }
+   else if(ratio == RATIO_079)
+     {
+      // 0.79 必须在 (p_bot, p_top) 之间, 且 >= 0.49
+      if(dir > 0 && newPrice > p_top - margin) newPrice = p_top - margin;
+      if(dir < 0 && newPrice < g_p49 + margin) newPrice = g_p49 + margin;
+     }
+   else if(ratio == RATIO_049)
+     {
+      // 0.49 必须在 (p_bot, p_top) 之间, 且 <= 0.79
+      if(dir > 0 && newPrice > g_p79 - margin) newPrice = g_p79 - margin;
+      if(dir < 0 && newPrice < p_bot + margin) newPrice = p_bot + margin;
+     }
+
+   return newPrice;
+  }
+
+// 处理 STEP 按钮点击: 解析 name → (ratio, dir), 双击检测, 计算步长, 调用 ApplyDrag
+void ApplyStepButton(string name)
+  {
+   string sfx = StringSubstr(name, StringLen(g_prefix));
+   int dir = 0;
+   int rint = -1;
+   if(StringFind(sfx, "STEP_UP_") == 0)
+     {
+      dir  = +1;
+      rint = (int)StringToInteger(StringSubstr(sfx, 8));
+     }
+   else if(StringFind(sfx, "STEP_DN_") == 0)
+     {
+      dir  = -1;
+      rint = (int)StringToInteger(StringSubstr(sfx, 8));
+     }
+   else return;
+   if(rint != 0 && rint != 49 && rint != 79 && rint != 100) return;
+   double ratio = rint / 100.0;
+
+   // 释放按钮视觉
+   ObjectSetInteger(0, name, OBJPROP_STATE, false);
+
+   // 双击检测: 300ms 内同按钮再点 → ×10 倍步长
+   long nowMs = GetTickCount();
+   int  mult  = 1;
+   if(g_lastStepName == name && (nowMs - g_lastStepTimeMs) <= STEP_DBLCLICK_MS)
+      mult = 10;
+   g_lastStepName   = name;
+   g_lastStepTimeMs = nowMs;
+
+   double range = MathAbs(g_p1 - g_p0);
+   if(range <= 0)
+     {
+      Print("[STEP] 区间未定义, 忽略 ", sfx);
+      return;
+     }
+   double step = range * InpStepPercent / 100.0 * (double)mult;
+   if(step < _Point) step = _Point;
+
+   double newPrice = ClampStepMove(ratio, dir, step);
+   double oldPrice = LevelPrice(ratio);
+   if(MathAbs(newPrice - oldPrice) < _Point * 0.5)
+     {
+      Print("[STEP] ", sfx, " 已被 fib 边界约束, 不移动 (old=", DoubleToString(oldPrice, _Digits), ")");
+      return;
+     }
+
+   Print("[STEP] ", sfx,
+         " mult=×", mult,
+         " step=", DoubleToString(step, _Digits),
+         " old=", DoubleToString(oldPrice, _Digits),
+         " new=", DoubleToString(newPrice, _Digits),
+         mult > 1 ? " (双击)" : "");
+   ApplyDrag(ratio, newPrice);
   }
 
 // 最上面那根线右侧：仅 CANCEL 按钮（v1.07：SWAP 已移到线段中点）
@@ -597,6 +790,7 @@ void RefreshAll()
 
    UpdateSwapButton(dir);
    UpdateAdjustButton();   // v1.13: ADJUST 按钮位置 (跟随 SWAP)
+   UpdateStepButtons();   // v1.17: 4 条主线的 UP/DOWN 按钮 (跟随线移动)
    UpdateMarketButton(dir);
    UpdateRiskButton();
    UpdateHideButton();
@@ -1640,6 +1834,14 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ToggleHide();   // UpdateHideButton 会根据 g_hidden 同步设置 STATE
          return;
         }
+
+      // v1.17: STEP 按钮 (UP/DOWN) — 解析名称 → ApplyStepButton
+      if(StringFind(sparam, g_prefix + "STEP_") == 0)
+        {
+         ApplyStepButton(sparam);
+         return;
+        }
+
       double r = RatioOfButton(sparam);
       if(r > 0)
         {

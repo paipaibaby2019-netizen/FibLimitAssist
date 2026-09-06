@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.17"
+#property version   "1.18"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -473,7 +473,10 @@ bool CreateStepButtons()
    return ok;
   }
 
-// 单个 STEP 按钮位置: X=左边缘, Y=对齐到该线当前 LevelPrice
+// 单个 STEP 按钮位置: UP 在左, DOWN 在右, 水平并排
+//   1.00  : 两个按钮整体在 1.00 线下方 (避免遮挡上方 K 线高点)
+//   0.00  : 两个按钮整体在 0.00 线上方 (避免和左下 HIDE 重叠)
+//   0.79 / 0.49 : 两个按钮中心与线对齐 (线从按钮中心穿过)
 void UpdateStepButton(double ratio, int dir)
   {
    string name = StepName(ratio, dir);
@@ -481,16 +484,30 @@ void UpdateStepButton(double ratio, int dir)
    double price = LevelPrice(ratio);
    int x = 0, y = 0;
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), price, x, y)) return;
-   int btnY = y - STEP_BTN_H / 2;
-   // DOWN 在下, UP 在上, 中间间距 STEP_BTN_GAP, 共占 STEP_BTN_H*2 + GAP 高度
-   if(dir > 0)
-      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, btnY - STEP_BTN_H - STEP_BTN_GAP / 2);   // UP 在线之上
-   else
-      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, btnY + STEP_BTN_GAP / 2);                // DOWN 在线之下
-   // X 紧贴左侧间距, UP 在左, DOWN 在右
+
    int xUp   = STEP_BTN_X;
    int xDown = STEP_BTN_X + STEP_BTN_DN_OFFSET;
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (dir > 0 ? xUp : xDown));
+   int btnX  = (dir > 0) ? xUp : xDown;
+
+   int btnY;
+   if(ratio == RATIO_100)
+     {
+      // 1.00: 整组按钮位于 1.00 线下方, 距线 2px
+      btnY = y + 2;
+     }
+   else if(ratio == RATIO_000)
+     {
+      // 0.00: 整组按钮位于 0.00 线上方, 距线 2px
+      btnY = y - STEP_BTN_H - 2;
+     }
+   else
+     {
+      // 0.79 / 0.49: 按钮中心与线对齐, 线穿过两按钮中心
+      btnY = y - STEP_BTN_H / 2;
+     }
+
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, btnX);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, btnY);
   }
 
 void UpdateStepButtons()

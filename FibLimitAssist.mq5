@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.18"
+#property version   "1.19"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -564,7 +564,7 @@ double ClampStepMove(double ratio, int dir, double step)
    return newPrice;
   }
 
-// 处理 STEP 按钮点击: 解析 name → (ratio, dir), 双击检测, 计算步长, 调用 ApplyDrag
+// 处理 STEP 按钮点击: 解析 name → (ratio, dir), 双击检测, 计算步长, 调用 ApplyStepDrag
 void ApplyStepButton(string name)
   {
    string sfx = StringSubstr(name, StringLen(g_prefix));
@@ -618,7 +618,23 @@ void ApplyStepButton(string name)
          " old=", DoubleToString(oldPrice, _Digits),
          " new=", DoubleToString(newPrice, _Digits),
          mult > 1 ? " (双击)" : "");
-   ApplyDrag(ratio, newPrice);
+   // v1.19: 用 ApplyStepDrag 而不是 ApplyDrag — 端点变化时不要重置 0.79/0.49
+   //   避免点击 1.00/0.00 时把用户手调的 0.79/0.49 突然重置到理论位置 (跳动/消失)
+   ApplyStepDrag(ratio, newPrice);
+  }
+
+// v1.19: STEP 按钮专用拖动 — 只改目标线, 不重置其他 fib 线
+//   手动拖动 (ApplyDrag): 端点变化会重置 0.79/0.49 → 理论值 (用户已熟悉此行为)
+//   STEP 按钮 (ApplyStepDrag): 单条线微调, 保留其他线的当前位置
+void ApplyStepDrag(double r, double price)
+  {
+   if(r == RATIO_100)      g_p1  = price;
+   else if(r == RATIO_000) g_p0  = price;
+   else if(r == RATIO_079) g_p79 = price;
+   else if(r == RATIO_049) g_p49 = price;
+   else return;
+   // v1.15: 端点/挂单线位置不再记忆, 无需保存
+   RefreshAll();
   }
 
 // 最上面那根线右侧：仅 CANCEL 按钮（v1.07：SWAP 已移到线段中点）

@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.21"
+#property version   "1.22"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -474,9 +474,11 @@ bool CreateStepButtons()
   }
 
 // 单个 STEP 按钮位置: UP 在左, DOWN 在右, 水平并排
-//   1.00  : 两个按钮整体在 1.00 线下方 (避免遮挡上方 K 线高点)
-//   0.00  : 两个按钮整体在 0.00 线上方 (避免和左下 HIDE 重叠)
-//   0.79 / 0.49 : 两个按钮中心与线对齐 (线从按钮中心穿过)
+// v1.22: 按视觉高端/低端判定位置, 不按 1.00/0.00 ratio
+//   long 时 1.00 在顶 / 0.00 在底; short 时 1.00 在底 / 0.00 在顶 (SWAP 反转)
+//   不论方向: 视觉高端 (顶) 按钮在该线下方 (避开上方 K 线)
+//             视觉低端 (底) 按钮在该线上方 (避开 HIDE)
+//             中间线 (0.79/0.49) 按钮中心与线对齐
 void UpdateStepButton(double ratio, int dir)
   {
    string name = StepName(ratio, dir);
@@ -489,20 +491,24 @@ void UpdateStepButton(double ratio, int dir)
    int xDown = STEP_BTN_X + STEP_BTN_DN_OFFSET;
    int btnX  = (dir > 0) ? xUp : xDown;
 
+   double topPrice = MathMax(g_p1, g_p0);
+   double botPrice = MathMin(g_p1, g_p0);
+   const double eps = _Point * 0.5;
+
    int btnY;
-   if(ratio == RATIO_100)
+   if(MathAbs(price - topPrice) < eps)
      {
-      // 1.00: 整组按钮位于 1.00 线下方, 距线 2px
+      // 视觉高端: 按钮位于该线下方 (避开上方 K 线)
       btnY = y + 2;
      }
-   else if(ratio == RATIO_000)
+   else if(MathAbs(price - botPrice) < eps)
      {
-      // 0.00: 整组按钮位于 0.00 线上方, 距线 2px
+      // 视觉低端: 按钮位于该线上方 (避开底部 HIDE)
       btnY = y - STEP_BTN_H - 2;
      }
    else
      {
-      // 0.79 / 0.49: 按钮中心与线对齐, 线穿过两按钮中心
+      // 中间线 (0.79 / 0.49): 按钮中心与线对齐, 线穿过两按钮中心
       btnY = y - STEP_BTN_H / 2;
      }
 
@@ -521,66 +527,38 @@ void UpdateStepButtons()
   }
 
 // 计算给定 ratio 和方向的"目标价格" — 在 fib 顺序约束下
-//   1.00 (top): DOWN 不能穿过 max(p79, p49); UP 可以进一步抬高 top
-//   0.00 (bot): UP   不能穿过 min(p79, p49); DOWN 可以进一步压低 bot
-//   0.79       : 在 p_top 和 0.49 之间
-//   0.49       : 在 p_bot 和 0.79 之间
-// v1.20: 撞 fib 边界时拒绝瞬移 — 保持 oldPrice 不动
-//   避免视觉上"瞬移到 0.79/0.49/1.00/0.00 位置" (单步 step 跨过整个剩余空间时尤其明显)
-//   用户多次小步点击慢慢靠近边界, 不会"瞬移"
+//   1.00 / 0.00 (端点): 完全自由 — 用户主动设的边界, 可以推开挂单线
+//   0.79              : 在 [botPrice, topPrice] 区间内, 且 >= 0.49 + margin
+//   0.49              : 在 [botPrice, topPrice] 区间内, 且 <= 0.79 - margin
+// v1.21: 端点 1.00/0.00 完全自由 (v1.21 commit 只加了 PlaySound, 此处为 v1.22 真正放开)
+// v1.22: 用 topPrice/botPrice 判定 0.79/0.49 撞视觉高端/低端 — long/short 自适应
+//   撞 fib 边界时仍 return oldPrice, ApplyStepButton 会 PlaySound 反馈
 double ClampStepMove(double ratio, int dir, double step)
   {
    double oldPrice = LevelPrice(ratio);
    double newPrice = oldPrice + dir * step;
 
-   double p_top = MathMax(g_p1, g_p0);
-   double p_bot = MathMin(g_p1, g_p0);
-   double margin = _Point;   // 留 1 个点的安全 gap, 避免 fab 关系"=="
+   double margin    = _Point;            // 留 1 个点的安全 gap, 避免 fib 关系"=="
+   double topPrice  = MathMax(g_p1, g_p0);   // 视觉高端 (屏幕顶部)
+   double botPrice  = MathMin(g_p1, g_p0);   // 视觉低端 (屏幕底部)
 
-   if(ratio == RATIO_100)
+   // 端点 1.00 / 0.00 完全自由 — 用户主动设的边界, 可以推开挂单线
+   if(ratio == RATIO_100 || ratio == RATIO_000)
+      return newPrice;
+
+   if(ratio == RATIO_079)
      {
-      // DOWN 限制: 不能低于 max(p79, p49)
-      double minAllowed = MathMax(g_p79, g_p49) + margin;
-      if(dir < 0 && newPrice < minAllowed)
-        {
-         // 撞边界: 拒绝瞬移, 保持 oldPrice
-         return oldPrice;
-        }
-      // UP 不限制
-     }
-   else if(ratio == RATIO_000)
-     {
-      // UP 限制: 不能高于 min(p79, p49)
-      double maxAllowed = MathMin(g_p79, g_p49) - margin;
-      if(dir > 0 && newPrice > maxAllowed)
-        {
-         return oldPrice;
-        }
-      // DOWN 不限制
-     }
-   else if(ratio == RATIO_079)
-     {
-      // 0.79 必须在 (p_bot, p_top) 之间, 且 >= 0.49
-      if(dir > 0 && newPrice > p_top - margin)
-        {
-         return oldPrice;
-        }
-      if(dir < 0 && newPrice < g_p49 + margin)
-        {
-         return oldPrice;
-        }
+      // 0.79 必须在 [botPrice, topPrice] 区间内, 且 >= 0.49
+      //   v1.22: UP 不能越过视觉高端 (topPrice), DOWN 不能越过 0.49
+      if(dir > 0 && newPrice > topPrice)        return oldPrice;
+      if(dir < 0 && newPrice < g_p49 + margin)  return oldPrice;
      }
    else if(ratio == RATIO_049)
      {
-      // 0.49 必须在 (p_bot, p_top) 之间, 且 <= 0.79
-      if(dir > 0 && newPrice > g_p79 - margin)
-        {
-         return oldPrice;
-        }
-      if(dir < 0 && newPrice < p_bot + margin)
-        {
-         return oldPrice;
-        }
+      // 0.49 必须在 [botPrice, topPrice] 区间内, 且 <= 0.79
+      //   v1.22: UP 不能越过 0.79, DOWN 不能越过视觉低端 (botPrice)
+      if(dir > 0 && newPrice > g_p79 - margin)  return oldPrice;
+      if(dir < 0 && newPrice < botPrice)        return oldPrice;
      }
 
    return newPrice;
@@ -691,14 +669,22 @@ void UpdateBottomButtons()
    int marketX = (w - marketW) / 2;
 
    // 左侧 HIDE / RISK
+   // v1.22: HIDE / RISK 右移到 STEP 按钮 (X=[6, 52]) 右侧, 避免 long 模式
+   //   0.00 在底部时与 0.00 STEP 按钮 Y 重叠
+   //   STEP 按钮范围 X=[STEP_BTN_X, STEP_BTN_X + STEP_BTN_DN_OFFSET + STEP_BTN_W]
+   //                      = [6, 6+24+22] = [6, 52]
+   //   留 8px 间隔 → HIDE X=60, RISK X=60+80+4=144
+   int xStepRight = STEP_BTN_X + STEP_BTN_DN_OFFSET + STEP_BTN_W;  // 52
+   int xHide      = xStepRight + 8;                                // 60
+   int xRisk      = xHide + 80 + 4;                                // 144
    if(ObjectFind(0, HideName()) >= 0)
      {
-      ObjectSetInteger(0, HideName(), OBJPROP_XDISTANCE, 10);
+      ObjectSetInteger(0, HideName(), OBJPROP_XDISTANCE, xHide);
       ObjectSetInteger(0, HideName(), OBJPROP_YDISTANCE, yBtn);
      }
    if(ObjectFind(0, RiskName()) >= 0)
      {
-      ObjectSetInteger(0, RiskName(), OBJPROP_XDISTANCE, 10 + 80 + 4);
+      ObjectSetInteger(0, RiskName(), OBJPROP_XDISTANCE, xRisk);
       ObjectSetInteger(0, RiskName(), OBJPROP_YDISTANCE, yBtn);
      }
 

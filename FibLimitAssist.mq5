@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.31"
+#property version   "1.32"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -19,6 +19,7 @@
 #property description "· v1.29 修复 Wine 误判: 平台检测改用 Z 盘/便携模式特征, mac(Wine) 不再被误当 Windows 缩放"
 #property description "· v1.30 STEP 按钮调整端点 (1.00/0.00) 时, 中间线 0.79/0.49 也按比例跟随 (与鼠标拖动端点行为一致)"
 #property description "· v1.31 新增 BUY/SELL STOP 突破挂单按钮 (在 MKT 右侧 slack 区): long=绿挂视觉 top+1tick, short=红挂视觉 bot-1tick, SL/TP/lot 与 MKT 一致"
+#property description "· v1.32 STOP/MKT 关于底线镜像对称 (MKT 上方 4px, STOP 下方 4px); STOP 不再抢占 g_btnX (恢复 CALL/CHALF/EVEN/CANCEL/挂单按钮/PnL 标签右对齐)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -416,10 +417,9 @@ void UpdateButtonX()
   {
    // v1.08：g_btnX = 最右边 CALL 按钮的左 X（CALL 宽 100，右边距 8）
    //  v1.27：UI 缩放后右边缘 = w - UI(108)
-   //  v1.31：BUY/SELL STOP 按钮占 110+4=114 给右链预留下沉空间, g_btnX 左移 UI(114)
-   //        顶部 CANCEL 同步左移, 但顶部 SWAP/ADJUST 间距充裕无影响.
+   //  v1.32：STOP 放回中间 slack 区, 不再吃 g_btnX 的位置 (回退到 v1.25 的 X)
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-   g_btnX = w - UI(108) - UI(114);
+   g_btnX = w - UI(108);
    if(g_btnX < 0) g_btnX = 0;
   }
 void UpdateButton(string name, double price, string text, int dir)
@@ -829,12 +829,13 @@ void UpdateBottomButtons()
 
    // v1.31: BUY/SELL STOP 按钮 — 紧邻 EVEN 左侧 (gap 6), 宽 110 与 MARKET 同尺寸
    //   g_btnX - 100 - 4 - 80 - 4 = g_btnX - 188 (EVEN 左) - 6 (gap) - 110 (STOP) = g_btnX - 304
+   // v1.32: Y 改到 botPrice + UI(4), 与 MARKET (y - UI(26), 顶边距底线 4px) 关于底线 (MathMin) 镜像对称
    if(ObjectFind(0, StopName()) >= 0)
      {
       int stopW = UI(110);
       int xStop = g_btnX - UI(100) - UI(4) - UI(80) - UI(4) - UI(6) - stopW;
       ObjectSetInteger(0, StopName(), OBJPROP_XDISTANCE, xStop);
-      ObjectSetInteger(0, StopName(), OBJPROP_YDISTANCE, yBtn);
+      ObjectSetInteger(0, StopName(), OBJPROP_YDISTANCE, y + UI(4));
      }
   }
 

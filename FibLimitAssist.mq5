@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.29"
+#property version   "1.30"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -17,6 +17,7 @@
 #property description "· SWAP/ADJUST/CANCEL 三个按钮统一放最上面线下方 4px (v1.26, 不再被线穿过)"
 #property description "· UI 缩放拆尺寸/字号: InpUIScale 缩按钮, InpFontScale 缩字号 (v1.28)"
 #property description "· v1.29 修复 Wine 误判: 平台检测改用 Z 盘/便携模式特征, mac(Wine) 不再被误当 Windows 缩放"
+#property description "· v1.30 STEP 按钮调整端点 (1.00/0.00) 时, 中间线 0.79/0.49 也按比例跟随 (与鼠标拖动端点行为一致)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -703,13 +704,24 @@ void ApplyStepButton(string name)
    ApplyStepDrag(ratio, newPrice);
   }
 
-// v1.19: STEP 按钮专用拖动 — 只改目标线, 不重置其他 fib 线
-//   手动拖动 (ApplyDrag): 端点变化会重置 0.79/0.49 → 理论值 (用户已熟悉此行为)
-//   STEP 按钮 (ApplyStepDrag): 单条线微调, 保留其他线的当前位置
+// v1.30: STEP 按钮移动端点 (1.00/0.00) → 同步重置 0.79/0.49 到理论值 (与拖动端点行为一致),
+//   让中间线成比例跟随. 命中 0.79/0.49 本身仍只动单条线, 不互相打扰 (与拖动行为一致).
+// 历史: v1.19 为避免按钮跳动改成"端点 STEP 也不重置", v1.30 用户反馈应与鼠标拖动行为对齐.
 void ApplyStepDrag(double r, double price)
   {
-   if(r == RATIO_100)      g_p1  = price;
-   else if(r == RATIO_000) g_p0  = price;
+   if(r == RATIO_100)
+     {
+      g_p1 = price;
+      // v1.30: 端点 STEP 与 ApplyDrag 行为对齐 — 中间线成比例回归
+      g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
+      g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
+     }
+   else if(r == RATIO_000)
+     {
+      g_p0 = price;
+      g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
+      g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
+     }
    else if(r == RATIO_079) g_p79 = price;
    else if(r == RATIO_049) g_p49 = price;
    else return;

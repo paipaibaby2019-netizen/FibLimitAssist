@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.27"
+#property version   "1.29"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -15,7 +15,8 @@
 #property description "· 1.00/0.79/0.49/0.00 各一对 STEP 按钮微调单线, 双击=×10 加速 (v1.17, v1.24 浅灰配色)"
 #property description "· HIDE 按钮改浅灰底 (与 CANCEL 同色, v1.25); EVEN/CHALF/CALL 等距 4px (v1.25); 0.79/0.49 线随方向变色 (long 绿/short 红, v1.25)"
 #property description "· SWAP/ADJUST/CANCEL 三个按钮统一放最上面线下方 4px (v1.26, 不再被线穿过)"
-#property description "· UI 缩放拆尺寸/字号: InpUIScale 缩按钮, InpFontScale 缩字号 (v1.28, Windows 服务器按钮默认 0.6 字号 1.0 不糊)"
+#property description "· UI 缩放拆尺寸/字号: InpUIScale 缩按钮, InpFontScale 缩字号 (v1.28)"
+#property description "· v1.29 修复 Wine 误判: 平台检测改用 Z 盘/便携模式特征, mac(Wine) 不再被误当 Windows 缩放"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -122,6 +123,28 @@ long     g_lastStepTimeMs   = 0;
 #define  STEP_DBLCLICK_MS   300
 
 //---------------------------- 工具函数 -----------------------------//
+// v1.29: 导入 kernel32.dll 的 GetLogicalDrives 用于探测 Wine 的 Z: 盘
+//   (仅读取逻辑盘位掩码, 无副作用; 若终端禁用 DLL 导入则返回 0, 由 path 兜底检测接住)
+#import "kernel32.dll"
+   uint GetLogicalDrives(void);
+#import
+
+// v1.29: 判断当前是否为 Wine 环境 (macOS/Linux 上通过 Wine 运行的 MT5)
+//   背景: v1.28 用 StringFind(TERMINAL_DATA_PATH,"\\") 判 Windows, 但 Wine 版数据路径同样含 '\\',
+//         导致 mac(Wine) 被误判为 Windows → 按钮被错误缩放到 0.6
+//   信号1: Wine 默认把 Unix 根 "/" 映射为 Z: 盘, 原生 Windows 几乎不会分配 Z 盘 (bit25)
+//   信号2(兜底, DLL 被禁用时): Wine 官方版是便携模式, 数据目录在 "Program Files" 下; 原生 Windows 标准安装数据目录在 "AppData" 下
+bool IsWine()
+  {
+   uint drives = GetLogicalDrives();                 // 若 DLL 被禁用, 返回 0
+   if(drives != 0 && (drives & (1u << 25)) != 0)     // bit25 = Z 盘
+      return true;
+   string dp = TerminalInfoString(TERMINAL_DATA_PATH);
+   if(StringFind(dp, "Program Files") >= 0 && StringFind(dp, "AppData") < 0)
+      return true;
+   return false;
+  }
+
 // 对象命名：按比例生成唯一名称
 string HName(double r) { return g_prefix + "H" + StringFormat("%.2f", r); } // 水平线
 string BName(double r) { return g_prefix + "B" + StringFormat("%.2f", r); } // 按钮
@@ -1819,10 +1842,10 @@ int OnInit()
    // v1.15: prefix 增加 _Period, 减少 MT5 ChartID 复用导致的跨周期状态串扰
    g_prefix = "FLA_" + IntegerToString(ChartID()) + "_" + _Symbol + "_" + EnumToString(_Period) + "_";
 
-   // v1.28: 计算 UI/字号缩放系数 — 手动值优先, 0 则按平台智能默认
-   //   平台检测: TerminalInfoString(TERMINAL_DATA_PATH) 含 '\' → Windows (远程 RDP/原生 Win), 否则 mac/Wine
-   //   智能默认: mac → UI 1.0 / Font 1.0;  Windows → UI 0.6 / Font 1.0 (按钮缩小但字保持清晰)
-   bool isWindows = (StringFind(TerminalInfoString(TERMINAL_DATA_PATH), "\\") >= 0);
+   // v1.29: 计算 UI/字号缩放系数 — 手动值优先, 0 则按平台智能默认
+   //   平台检测: IsWine() 判 Wine 环境(mac/Linux), 否则视为原生 Windows(远程 RDP/本地 Win)
+   //   智能默认: Wine(mac) → UI 1.0 / Font 1.0;  原生 Windows → UI 0.6 / Font 1.0 (按钮缩小但字保持清晰)
+   bool isWindows = !IsWine();
    double defaultUIScale   = isWindows ? 0.6 : 1.0;
    double defaultFontScale = 1.0;   // 默认字号不变 (按钮缩小但字保持可读)
    g_uiScale   = (InpUIScale   > 0.01) ? InpUIScale   : defaultUIScale;

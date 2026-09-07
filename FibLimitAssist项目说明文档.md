@@ -228,7 +228,8 @@ Range = |price_1.00 − price_0.00|
 | `InpAdjustDeviation` | 5 | [ADJUST] 候选与前一同向极值最小偏差，单位点（类比 zigzag ExtDeviation，v1.13） |
 | `InpAdjustBackstep` | 3 | [ADJUST] 候选最小时间距离，单位 bar（类比 zigzag ExtBackstep，替换紧挨假信号，v1.13） |
 | `InpStepPercent` | 1.0 | [STEP] 单击移动步长占 swing 区间百分比（%）；双击同按钮 300ms 内 = ×10（v1.17） |
-| `InpUIScale` | 1.0 | [UI] 界面缩放系数（v1.27）：统一缩放按钮/标签尺寸、字号与固定偏移。1=100%；按钮过大改 0.6~0.8；0=自动按 `TERMINAL_SCREEN_DPI/96`（远程 RDP 检测可能不准，建议手动） |
+| `InpUIScale` | 0.0 | [UI] **按钮尺寸**缩放系数（v1.27；v1.28 拆分为尺寸/字号两个；v1.29 修复 Wine 误判）：`0`=按平台智能默认（Wine/mac=1.0，原生 Windows=0.6）；正数=手动覆盖（按钮过大时调小，如 0.5~0.7） |
+| `InpFontScale` | 0.0 | [UI] **字号**缩放系数（v1.28 新增，与 `InpUIScale` 解耦）：`0`=按平台智能默认（始终 1.0，字保持清晰）；正数=手动覆盖（如 0.8=字略小） |
 
 > 单笔风险百分比已迁移到 RISK 按钮（运行时循环切换 0.5/1/2%）。
 > 盈亏比已按比例分档（0.79=3:1，0.49=1:1，市价=1:1），不再需要全局参数。
@@ -278,5 +279,6 @@ Range = |price_1.00 − price_0.00|
 | 1.26 | 2026-09-07 | SWAP/ADJUST/CANCEL 三按钮统一放到**最上面线下方 4px**，不再被线穿过 |
 | 1.27 | 2026-09-07 | 新增 **UI 界面缩放系数** `InpUIScale`（默认 1.0）：统一缩放所有按钮/标签的尺寸、字号与固定像素偏移。解决**远程 Windows 服务器上按钮过大**的问题（Mac/Wine 版正常，远程 RDP 高 DPI 下 EA 固定像素按钮被放大）。用法：服务器上把 `InpUIScale` 调小（如 0.6~0.8）；`0` = 自动按 `TERMINAL_SCREEN_DPI/96` 计算（远程 RDP 可能检测不准，建议手动）。 |
 | 1.28 | 2026-09-07 | **拆分尺寸/字号缩放**（关键改进）：① 新增 `InpFontScale` 独立控制字号；② `InpUIScale`/`InpFontScale` 默认值改为 `0` 触发**智能默认**：通过 `TerminalInfoString(TERMINAL_DATA_PATH)` 含 `\` 判断平台 → Windows 默认按钮 0.6 / 字号 1.0（按钮缩小但文字保持清晰可读，彻底解决 v1.27 把字号也缩糊的问题），mac/Wine 默认 1.0/1.0 不变；④ 用户把任一参数改成非 0 正数即可手动覆盖智能默认；⑤ 内部新增 `Font(int)` 缩放辅助函数，8 处 `OBJPROP_FONTSIZE` 改用 `Font()`，尺寸/位置仍用 `UI()`。**部署服务器时无需再手动改参数**，开箱即用。 |
+| 1.29 | 2026-09-07 | **修复 Wine 误判**：v1.28 用 `TERMINAL_DATA_PATH` 含 `\` 判 Windows，但 Wine 版（mac）数据路径同样含 `\`，导致 mac 首次加载被误当 Windows 缩放到 0.6。改用 `IsWine()` 双信号检测：① `#import "kernel32.dll"` 的 `GetLogicalDrives()` 探测 Z 盘（Wine 把 Unix 根 `/` 映射为 Z:，原生 Windows 几乎不会分配 Z 盘）；② 兜底（DLL 被禁用时）检测数据目录在 `Program Files`（Wine 便携模式）而非 `AppData`（原生 Windows 标准安装）。修复后：mac/Wine → UI 1.0，原生 Windows → UI 0.6。**同时补上 v1.28 遗漏的 `#property version` 号（1.27 → 1.29）**。 |
 
 > **版本缺口已回补**：v1.10~v1.26 由用户在另一台电脑编辑并直接提交 GitHub（未同步文档），现已于 2026-09-07 根据 git 历史与代码注释逐条回补至本文档。其中 v1.10/v1.11/v1.12/v1.14 在 git 中无独立提交（本地迭代后随 v1.13 一次性推送），内容以代码注释标注为准（v1.12 = 切日时区，v1.13 = ADJUST 按钮）。

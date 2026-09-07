@@ -15,7 +15,7 @@
 #property description "· 1.00/0.79/0.49/0.00 各一对 STEP 按钮微调单线, 双击=×10 加速 (v1.17, v1.24 浅灰配色)"
 #property description "· HIDE 按钮改浅灰底 (与 CANCEL 同色, v1.25); EVEN/CHALF/CALL 等距 4px (v1.25); 0.79/0.49 线随方向变色 (long 绿/short 红, v1.25)"
 #property description "· SWAP/ADJUST/CANCEL 三个按钮统一放最上面线下方 4px (v1.26, 不再被线穿过)"
-#property description "· UI 界面缩放系数 InpUIScale 统一缩放所有按钮/标签 (v1.27, 远程服务器按钮过大时可调小 ×)"
+#property description "· UI 缩放拆尺寸/字号: InpUIScale 缩按钮, InpFontScale 缩字号 (v1.28, Windows 服务器按钮默认 0.6 字号 1.0 不糊)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -44,8 +44,12 @@ input double InpStepPercent  = 1.0; // [STEP] 单击移动步长占 swing 区间
 
 // v1.27 新增: UI 界面缩放系数 (统一缩放所有按钮/标签的尺寸与间距)
 //   Mac/Wine 版或 96DPI 屏幕用 1.0; 远程 Windows 服务器按钮过大时, 调小 (如 0.6~0.8)
-//   0 = 自动按 TERMINAL_SCREEN_DPI/96 计算 (远程 RDP 可能检测不准, 建议手动)
-input double InpUIScale = 1.0; // [UI] 界面缩放系数 (1=100%; 按钮过大改 0.6~0.8; 0=自动按DPI)
+//   0 = 自动按平台智能默认 (mac=1.0, Windows=0.6); 其他正数 = 强制使用 (手动覆盖智能默认)
+input double InpUIScale = 0.0;   // [UI] 按钮尺寸缩放系数 (0=按平台智能默认; 正数=强制值)
+
+// v1.28 新增: 字号独立缩放系数 (与 InpUIScale 解耦, 防止按钮缩小后文字看不清)
+//   0 = 自动按平台智能默认 (mac=1.0, Windows=1.0); 其他正数 = 强制值 (如 0.8=字小一些)
+input double InpFontScale = 0.0;  // [UI] 字号缩放系数 (0=按平台智能默认; 正数=强制值)
 
 //---------------------------- 固定比例 -----------------------------//
 #define RATIO_100 1.00
@@ -96,11 +100,16 @@ double   g_riskValues[3] = {0.5, 1.0, 2.0};  // 可选档位 (循环顺序: 1 �
 // HIDE/SHOW 状态 (会话内有效，重启后恢复显示——避免忘记 EA 被隐藏找不到)
 bool     g_hidden = false;     // true=隐藏 EA 线条与按钮(HIDE 按钮自身除外)
 
-// v1.27: UI 界面缩放系数 (InpUIScale 决定; 默认 1.0, 远程按钮过大时调小)
-double   g_uiScale = 1.0;
+// v1.28: UI 缩放系数拆成两个 — g_uiScale 缩按钮尺寸, g_fontScale 缩字号
+//   默认 1.0/1.0; Windows 服务器上智能默认 0.6/1.0 (按钮缩小但字保持清晰)
+//   手动覆盖: InpUIScale / InpFontScale 任一改为非 0 正数时优先用手动值
+double   g_uiScale   = 1.0;
+double   g_fontScale = 1.0;
 
 // 缩放辅助: 把设计像素乘以 UI 缩放系数 (四舍五入), 用于所有按钮/标签尺寸与固定偏移
-int UI(int px) { return (int)MathRound(px * g_uiScale); }
+int UI(int px)   { return (int)MathRound(px * g_uiScale); }
+// v1.28 新增: 字号独立缩放 (与按钮尺寸解耦, 防止按钮缩小后文字看不清)
+int Font(int px) { return (int)MathRound(px * g_fontScale); }
 
 // v1.12 新增: 服务器相对 GMT 的偏移小时数 (OnInit 自动探测一次)
 //   由 (TimeCurrent() - TimeGMT()) 推断，如 broker 是 GMT+2 则 g_serverGMTOffset = +2
@@ -203,7 +212,7 @@ bool CreateButton(string name)
    ObjectSetInteger(0, name, OBJPROP_YSIZE, UI(22));
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(7));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Font(7));
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, name, OBJPROP_STATE, false);
@@ -215,7 +224,7 @@ bool CreateLabel(string name, string text, color clr, ENUM_ANCHOR_POINT anchor)
    if(!ObjectCreate(0, name, OBJ_TEXT, 0, 0, 0)) return false;
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(8));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Font(8));
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, anchor);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
@@ -228,7 +237,7 @@ bool CreateLabelRight(string name, string text, color clr)
    if(!ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0)) return false;
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(8));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Font(8));
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_RIGHT_LOWER);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
@@ -276,7 +285,7 @@ bool CreateSwapButton()
    ObjectSetInteger(0, name, OBJPROP_YSIZE, UI(22));
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(7));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Font(7));
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, name, OBJPROP_STATE, false);
@@ -295,7 +304,7 @@ bool CreateAdjustButton()
    ObjectSetInteger(0, name, OBJPROP_YSIZE, UI(22));
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(7));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Font(7));
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'100,100,160');
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
@@ -322,7 +331,7 @@ bool CreateActionButton(string name, int xsize, string text, color bg, string to
    ObjectSetInteger(0, name, OBJPROP_YSIZE, UI(22));
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(7));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Font(7));
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
@@ -366,7 +375,7 @@ bool CreatePnLLabel(string name)
   {
    if(!ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0)) return false;
    ObjectSetString(0, name, OBJPROP_TEXT, "");
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(8));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Font(8));
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
@@ -478,7 +487,7 @@ bool CreateStepButton(double ratio, int dir)
    ObjectSetInteger(0, name, OBJPROP_YSIZE, UI(STEP_BTN_H));
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(7));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Font(7));
    ObjectSetInteger(0, name, OBJPROP_COLOR, CLR_STEP_TXT);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, CLR_STEP_BG);
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
@@ -1810,13 +1819,18 @@ int OnInit()
    // v1.15: prefix 增加 _Period, 减少 MT5 ChartID 复用导致的跨周期状态串扰
    g_prefix = "FLA_" + IntegerToString(ChartID()) + "_" + _Symbol + "_" + EnumToString(_Period) + "_";
 
-   // v1.27: 计算 UI 缩放系数 — 手动值优先, 0 则按屏幕 DPI/96 自动
-   if(InpUIScale > 0.01)
-      g_uiScale = InpUIScale;
-   else
-      g_uiScale = TerminalInfoInteger(TERMINAL_SCREEN_DPI) / 96.0;
-   if(g_uiScale < 0.2) g_uiScale = 0.2;   // 下限保护
-   if(g_uiScale > 3.0) g_uiScale = 3.0;   // 上限保护
+   // v1.28: 计算 UI/字号缩放系数 — 手动值优先, 0 则按平台智能默认
+   //   平台检测: TerminalInfoString(TERMINAL_DATA_PATH) 含 '\' → Windows (远程 RDP/原生 Win), 否则 mac/Wine
+   //   智能默认: mac → UI 1.0 / Font 1.0;  Windows → UI 0.6 / Font 1.0 (按钮缩小但字保持清晰)
+   bool isWindows = (StringFind(TerminalInfoString(TERMINAL_DATA_PATH), "\\") >= 0);
+   double defaultUIScale   = isWindows ? 0.6 : 1.0;
+   double defaultFontScale = 1.0;   // 默认字号不变 (按钮缩小但字保持可读)
+   g_uiScale   = (InpUIScale   > 0.01) ? InpUIScale   : defaultUIScale;
+   g_fontScale = (InpFontScale > 0.01) ? InpFontScale : defaultFontScale;
+   if(g_uiScale   < 0.2) g_uiScale   = 0.2;   // 下限保护
+   if(g_uiScale   > 3.0) g_uiScale   = 3.0;   // 上限保护
+   if(g_fontScale < 0.2) g_fontScale = 0.2;   // 下限保护
+   if(g_fontScale > 3.0) g_fontScale = 3.0;   // 上限保护
 
    // v1.12: 自动探测服务器时区 (用于 CE(S)T 切日换算)
    DetectTimezone();

@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.30"
+#property version   "1.31"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -18,6 +18,7 @@
 #property description "· UI 缩放拆尺寸/字号: InpUIScale 缩按钮, InpFontScale 缩字号 (v1.28)"
 #property description "· v1.29 修复 Wine 误判: 平台检测改用 Z 盘/便携模式特征, mac(Wine) 不再被误当 Windows 缩放"
 #property description "· v1.30 STEP 按钮调整端点 (1.00/0.00) 时, 中间线 0.79/0.49 也按比例跟随 (与鼠标拖动端点行为一致)"
+#property description "· v1.31 新增 BUY/SELL STOP 突破挂单按钮 (在 MKT 右侧 slack 区): long=绿挂视觉 top+1tick, short=红挂视觉 bot-1tick, SL/TP/lot 与 MKT 一致"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -288,6 +289,8 @@ string PnLRightName()      { return g_prefix + "PNLR"; }
 string RiskName()          { return g_prefix + "RISK"; }
 // 市价下单按钮对象名
 string MarketName()        { return g_prefix + "MARKET"; }
+// v1.31：突破挂单按钮对象名 (BUY STOP / SELL STOP)
+string StopName()          { return g_prefix + "STOP"; }
 // 隐藏/显示按钮对象名 (始终显示，不会随 g_hidden 隐藏)
 string HideName()          { return g_prefix + "HIDE"; }
 // v1.13: 一键调整 1.00/0.00 到最近高低点的按钮对象名
@@ -383,6 +386,7 @@ void CreateObjects()
    CreateActionButton(EvenName(),           80, "EVEN",          C'60,120,200',  "一键入场价（仅当前品种）：盈利仓位SL改到入场；亏损仓位TP改到入场（保本平仓）");
    CreateActionButton(RiskName(),           80, "",              C'90,90,90',   "点击循环切换单笔风险档位：0.5% → 1% → 2% → 0.5%");
    CreateActionButton(MarketName(),        110, "MARKET",        C'140,140,140',"市价下单（止损 = 1.00 ± Range×1%，盈亏比 1:1）");
+   CreateActionButton(StopName(),          110, "STOP",          CLR_FLAT_BG,    "突破挂单: BUY STOP (long) 挂在视觉 topPrice + 1 tick, SELL STOP (short) 挂在视觉 botPrice - 1 tick; SL/TP/lot 与 MARKET 共用公式");
    CreateActionButton(HideName(),           80, "HIDE",          CLR_HIDE_OFF,   "隐藏/显示 EA 全部线条与按钮（此按钮自身始终显示）");
 
    // v1.08：MKT 两侧的实时盈亏数字标签（OBJ_LABEL 像素定位）
@@ -412,8 +416,10 @@ void UpdateButtonX()
   {
    // v1.08：g_btnX = 最右边 CALL 按钮的左 X（CALL 宽 100，右边距 8）
    //  v1.27：UI 缩放后右边缘 = w - UI(108)
+   //  v1.31：BUY/SELL STOP 按钮占 110+4=114 给右链预留下沉空间, g_btnX 左移 UI(114)
+   //        顶部 CANCEL 同步左移, 但顶部 SWAP/ADJUST 间距充裕无影响.
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-   g_btnX = w - UI(108);
+   g_btnX = w - UI(108) - UI(114);
    if(g_btnX < 0) g_btnX = 0;
   }
 void UpdateButton(string name, double price, string text, int dir)
@@ -820,6 +826,16 @@ void UpdateBottomButtons()
       ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, g_btnX - UI(100) - UI(4) - UI(80) - UI(4));  // v1.25: 与 CHALF/CALL 等距 4px
       ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yBtn);
      }
+
+   // v1.31: BUY/SELL STOP 按钮 — 紧邻 EVEN 左侧 (gap 6), 宽 110 与 MARKET 同尺寸
+   //   g_btnX - 100 - 4 - 80 - 4 = g_btnX - 188 (EVEN 左) - 6 (gap) - 110 (STOP) = g_btnX - 304
+   if(ObjectFind(0, StopName()) >= 0)
+     {
+      int stopW = UI(110);
+      int xStop = g_btnX - UI(100) - UI(4) - UI(80) - UI(4) - UI(6) - stopW;
+      ObjectSetInteger(0, StopName(), OBJPROP_XDISTANCE, xStop);
+      ObjectSetInteger(0, StopName(), OBJPROP_YDISTANCE, yBtn);
+     }
   }
 
 // 0.79/0.49 挂单按钮文字：保留比例与手数，去掉中间的 BL/SL（颜色已区分方向）
@@ -865,6 +881,17 @@ void UpdateMarketButton(int dir)
    string name = MarketName();
    if(ObjectFind(0, name) < 0) return;
    string t = (dir == DIR_UP) ? "BUY MKT" : ((dir == DIR_DOWN) ? "SELL MKT" : "--");
+   color bg = (dir == DIR_UP) ? CLR_BUY_BG : ((dir == DIR_DOWN) ? CLR_SELL_BG : CLR_FLAT_BG);
+   ObjectSetString(0, name, OBJPROP_TEXT, t);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
+  }
+
+// v1.31: 突破挂单按钮文字与颜色 — 按方向显示 BUY STOP / SELL STOP / --
+void UpdateStopButton(int dir)
+  {
+   string name = StopName();
+   if(ObjectFind(0, name) < 0) return;
+   string t = (dir == DIR_UP) ? "BUY STOP" : ((dir == DIR_DOWN) ? "SELL STOP" : "--");
    color bg = (dir == DIR_UP) ? CLR_BUY_BG : ((dir == DIR_DOWN) ? CLR_SELL_BG : CLR_FLAT_BG);
    ObjectSetString(0, name, OBJPROP_TEXT, t);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
@@ -927,6 +954,7 @@ void RefreshAll()
    UpdateAdjustButton();   // v1.13: ADJUST 按钮位置 (跟随 SWAP)
    UpdateStepButtons();   // v1.17: 4 条主线的 UP/DOWN 按钮 (跟随线移动)
    UpdateMarketButton(dir);
+   UpdateStopButton(dir);   // v1.31: 突破挂单按钮文字与配色跟随方向
    UpdateRiskButton();
    UpdateHideButton();
    UpdateTopButtons();
@@ -1341,6 +1369,80 @@ void PlaceMarketOrder()
      }
 
    SendMarketOrder(dir, sl, tp, lot);
+  }
+
+// v1.31: 突破挂单发送 (BUY STOP / SELL STOP pending order)
+void SendStopOrder(int dir, double price, double sl, double tp, double lot)
+  {
+   MqlTradeRequest req;
+   MqlTradeResult  res;
+   ZeroMemory(req);
+   ZeroMemory(res);
+
+   req.action       = TRADE_ACTION_PENDING;
+   req.symbol       = _Symbol;
+   req.magic        = InpMagicNumber;
+   req.volume       = lot;
+   req.price        = NormalizeDouble(price, _Digits);
+   req.sl           = NormalizeDouble(sl, _Digits);
+   req.tp           = NormalizeDouble(tp, _Digits);
+   req.deviation    = 10;
+   req.type         = (dir == DIR_UP) ? ORDER_TYPE_BUY_STOP : ORDER_TYPE_SELL_STOP;
+   req.type_filling = GetFillMode();
+   req.type_time    = ORDER_TIME_GTC;   // 无过期时间
+   req.comment      = InpOrderComment;
+
+   if(!OrderSend(req, res))
+     {
+      Alert("[FibLimitAssist] 突破单挂失败 retcode=", res.retcode, " ", res.comment);
+      return;
+     }
+   Print("[FibLimitAssist] 突破单挂成功 ticket=", res.order, " ",
+         (dir == DIR_UP ? "BUY" : "SELL"), " STOP vol=", DoubleToString(lot, InpLotDecimals),
+         " entry=", DoubleToString(price, _Digits),
+         " SL=",   DoubleToString(sl,    _Digits),
+         " TP=",   DoubleToString(tp,    _Digits));
+  }
+
+// v1.31: 突破挂单 — 入场=视觉 topPrice+1tick (BUY STOP) / botPrice-1tick (SELL STOP),
+//   SL/TP/lot 与市价按钮完全一致 (复用 PlaceMarketOrder 的公式).
+void PlaceStopOrder()
+  {
+   int dir = Dir();
+   if(dir == DIR_FLAT)
+     {
+      Alert("[FibLimitAssist] 区间未定义：1.00 与 0.00 重合，无法下突破单");
+      return;
+     }
+
+   double topPrice = MathMax(g_p1, g_p0);
+   double botPrice = MathMin(g_p1, g_p0);
+   double entry    = (dir == DIR_UP) ? NormalizeDouble(topPrice + _Point, _Digits)
+                                     : NormalizeDouble(botPrice - _Point, _Digits);
+   double range    = MathAbs(g_p0 - g_p1);
+
+   // SL 公式与市价按钮一致: g_p1 ± range * InpSL_OffsetPercent/100 (BUY 在 1.00 下方, SELL 在 1.00 上方)
+   double sl = (dir == DIR_UP) ? (g_p1 - range * InpSL_OffsetPercent / 100.0)
+                               : (g_p1 + range * InpSL_OffsetPercent / 100.0);
+
+   // 方向校验
+   if(dir == DIR_UP  && sl >= entry) { Alert("[FibLimitAssist] BUY STOP SL 不低于 entry, 拒绝挂单"); return; }
+   if(dir == DIR_DOWN && sl <= entry) { Alert("[FibLimitAssist] SELL STOP SL 不高于 entry, 拒绝挂单"); return; }
+
+   // TP 距离 = SL 距离 (与 MKT 一致 1:1)
+   double tp = (dir == DIR_UP) ? entry + (entry - sl)
+                               : entry - (sl - entry);
+
+   double lot    = CalcLot(entry, sl);
+   double volMin = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   if(lot < volMin)
+     {
+      Alert("[FibLimitAssist] 计算手数 ", DoubleToString(lot, InpLotDecimals),
+            " 小于品种最小手数 ", DoubleToString(volMin, InpLotDecimals), ", 拒绝突破单");
+      return;
+     }
+
+   SendStopOrder(dir, entry, sl, tp, lot);
   }
 
 //---------------------------- 一键清场 -----------------------------//
@@ -1975,6 +2077,12 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
         {
          PlaceMarketOrder();
          ObjectSetInteger(0, MarketName(), OBJPROP_STATE, false);
+         return;
+        }
+      if(sparam == StopName())
+        {
+         PlaceStopOrder();
+         ObjectSetInteger(0, StopName(), OBJPROP_STATE, false);
          return;
         }
       if(sparam == HideName())

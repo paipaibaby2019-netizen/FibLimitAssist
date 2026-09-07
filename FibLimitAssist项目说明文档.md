@@ -246,3 +246,7 @@ Range = |price_1.00 − price_0.00|
 | 1.07 | 2026-09-04 | HIDE 对线条也生效（HLine 改用 `OBJPROP_PRICE=1e20` 移出屏外）；删除 `1.00`/`0.00` 端点标签（与按钮重叠），仅保留 0.21；修复 RISK 档位切换后文字不刷新（CycleRisk 末尾补 RefreshAll）；动作型按钮点击后自动回弹（HIDE 保留 sticky）；SWAP 居中；HIDE/SHOW 配色区分（深灰/橙黄）；RISK 三档配色（0.5% 绿 / 1% 黄 / 2% 红） |
 | 1.08 | 2026-09-04 | 0.79/0.49 挂单按钮缩窄至 120；CLOSE HALF→`CHALF`、CLOSE ALL→`CALL`（宽 100）；新增 `EVEN` 一键保本按钮（盈利仓 SL=入场价，亏损仓 TP=入场价）；MARKET 按钮两侧新增实时盈亏数字标签（左=全部持仓浮盈，右=本地 00:00 起当日盈亏；绿(+)/红(-)/灰(0)，每 tick 刷新）；修复编译错误（补上 CLR_PLUS/CLR_MINUS/CLR_PNL_NEUTRAL 颜色宏） |
 | 1.09 | 2026-09-04 | 修复 0.79/0.49 挂单按钮未靠右对齐（右边缘统一对齐到 w−8，与 CALL/CANCEL 同列）；SWAP 按钮从区间中点移到**最上面那根线**的中点 |
+| 1.10~1.26 | 2026-09-05~07 | ⚠️ **由另一台电脑提交，尚未回补本文档**（见下方"版本缺口说明"）。已拉取到本地。主要变更：v1.12 日切时区（CE(S)T）、v1.13 ADJUST 按钮、v1.15 prefix 加 `_Period`、v1.17 STEP 步进按钮、v1.22~1.23 long/short 自适应、v1.24~1.26 配色与布局微调 |
+| 1.27 | 2026-09-07 | 新增 **UI 界面缩放系数** `InpUIScale`（默认 1.0）：统一缩放所有按钮/标签的尺寸、字号与固定像素偏移。解决**远程 Windows 服务器上按钮过大**的问题（Mac/Wine 版正常，远程 RDP 高 DPI 下 EA 固定像素按钮被放大）。用法：服务器上把 `InpUIScale` 调小（如 0.6~0.8）；`0` = 自动按 `TERMINAL_SCREEN_DPI/96` 计算（远程 RDP 可能检测不准，建议手动）。 |
+
+> **版本缺口说明**：文档此前停留在 v1.09（2026-09-04），之后 v1.10~v1.26 由用户在另一台电脑编辑并直接提交 GitHub（未同步文档）。`FibLimitAssist.mq5` 已通过 `git pull` 拉到最新 v1.27，**本文档的 3.3~3.6 章节及输入参数表仍停留在 v1.09 描述，需要后续回补** v1.10~v1.26 的新增按钮（ADJUST / STEP）与参数（InpAdjustDepth / InpAdjustDeviation / InpAdjustBackstep / InpStepPercent / InpDayResetTimezone）。

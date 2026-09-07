@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.26"
+#property version   "1.27"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -15,6 +15,7 @@
 #property description "· 1.00/0.79/0.49/0.00 各一对 STEP 按钮微调单线, 双击=×10 加速 (v1.17, v1.24 浅灰配色)"
 #property description "· HIDE 按钮改浅灰底 (与 CANCEL 同色, v1.25); EVEN/CHALF/CALL 等距 4px (v1.25); 0.79/0.49 线随方向变色 (long 绿/short 红, v1.25)"
 #property description "· SWAP/ADJUST/CANCEL 三个按钮统一放最上面线下方 4px (v1.26, 不再被线穿过)"
+#property description "· UI 界面缩放系数 InpUIScale 统一缩放所有按钮/标签 (v1.27, 远程服务器按钮过大时可调小 ×)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -40,6 +41,11 @@ input int InpAdjustBackstep  = 3;   // [ADJUST] 候选最小时间距离 (单位
 
 // v1.17 新增: 1.00/0.00/0.79/0.49 线上 UP/DOWN 按钮 - 单击步长 = swing 区间 × (InpStepPercent)%, 双击 ×10
 input double InpStepPercent  = 1.0; // [STEP] 单击移动步长占 swing 区间百分比 (%); 双击同按钮 300ms 内 = ×10
+
+// v1.27 新增: UI 界面缩放系数 (统一缩放所有按钮/标签的尺寸与间距)
+//   Mac/Wine 版或 96DPI 屏幕用 1.0; 远程 Windows 服务器按钮过大时, 调小 (如 0.6~0.8)
+//   0 = 自动按 TERMINAL_SCREEN_DPI/96 计算 (远程 RDP 可能检测不准, 建议手动)
+input double InpUIScale = 1.0; // [UI] 界面缩放系数 (1=100%; 按钮过大改 0.6~0.8; 0=自动按DPI)
 
 //---------------------------- 固定比例 -----------------------------//
 #define RATIO_100 1.00
@@ -89,6 +95,12 @@ double   g_riskValues[3] = {0.5, 1.0, 2.0};  // 可选档位 (循环顺序: 1 �
 
 // HIDE/SHOW 状态 (会话内有效，重启后恢复显示——避免忘记 EA 被隐藏找不到)
 bool     g_hidden = false;     // true=隐藏 EA 线条与按钮(HIDE 按钮自身除外)
+
+// v1.27: UI 界面缩放系数 (InpUIScale 决定; 默认 1.0, 远程按钮过大时调小)
+double   g_uiScale = 1.0;
+
+// 缩放辅助: 把设计像素乘以 UI 缩放系数 (四舍五入), 用于所有按钮/标签尺寸与固定偏移
+int UI(int px) { return (int)MathRound(px * g_uiScale); }
 
 // v1.12 新增: 服务器相对 GMT 的偏移小时数 (OnInit 自动探测一次)
 //   由 (TimeCurrent() - TimeGMT()) 推断，如 broker 是 GMT+2 则 g_serverGMTOffset = +2
@@ -187,11 +199,11 @@ bool CreateButton(string name)
   {
    if(!ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0)) return false;
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_XSIZE, 120);   // v1.08：挂单按钮从 200 缩到 120（v1.06 的 60%）
-   ObjectSetInteger(0, name, OBJPROP_YSIZE, 22);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, UI(120));   // v1.08：挂单按钮从 200 缩到 120（v1.06 的 60%）; v1.27 UI 缩放
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, UI(22));
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 7);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(7));
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, name, OBJPROP_STATE, false);
@@ -203,7 +215,7 @@ bool CreateLabel(string name, string text, color clr, ENUM_ANCHOR_POINT anchor)
    if(!ObjectCreate(0, name, OBJ_TEXT, 0, 0, 0)) return false;
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(8));
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, anchor);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
@@ -216,7 +228,7 @@ bool CreateLabelRight(string name, string text, color clr)
    if(!ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0)) return false;
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(8));
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_RIGHT_LOWER);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
@@ -260,11 +272,11 @@ bool CreateSwapButton()
    string name = SwapName();
    if(!ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0)) return false;
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_XSIZE, 80);
-   ObjectSetInteger(0, name, OBJPROP_YSIZE, 22);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, UI(80));
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, UI(22));
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 7);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(7));
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, name, OBJPROP_STATE, false);
@@ -279,11 +291,11 @@ bool CreateAdjustButton()
    string name = AdjustName();
    if(!ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0)) return false;
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_XSIZE, 80);
-   ObjectSetInteger(0, name, OBJPROP_YSIZE, 22);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, UI(80));
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, UI(22));
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 7);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(7));
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'100,100,160');
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
@@ -306,11 +318,11 @@ bool CreateActionButton(string name, int xsize, string text, color bg, string to
   {
    if(!ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0)) return false;
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_XSIZE, xsize);
-   ObjectSetInteger(0, name, OBJPROP_YSIZE, 22);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, UI(xsize));
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, UI(22));
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 7);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(7));
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
@@ -354,7 +366,7 @@ bool CreatePnLLabel(string name)
   {
    if(!ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0)) return false;
    ObjectSetString(0, name, OBJPROP_TEXT, "");
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(8));
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
@@ -366,11 +378,9 @@ bool CreatePnLLabel(string name)
 void UpdateButtonX()
   {
    // v1.08：g_btnX = 最右边 CALL 按钮的左 X（CALL 宽 100，右边距 8）
-   //  · 0.79/0.49 挂单按钮：宽 120，左 X = g_btnX - 20（右边缘与 CALL/CANCEL 右边缘对齐 = w-8）
-   //  · CHALF 按钮：宽 100，左 X = g_btnX - 104
-   //  · EVEN 按钮：宽 80，左 X = g_btnX - 188（v1.25 右移，与 CHALF/CALL 间距统一为 4px）
+   //  v1.27：UI 缩放后右边缘 = w - UI(108)
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-   g_btnX = w - 108;
+   g_btnX = w - UI(108);
    if(g_btnX < 0) g_btnX = 0;
   }
 void UpdateButton(string name, double price, string text, int dir)
@@ -379,9 +389,9 @@ void UpdateButton(string name, double price, string text, int dir)
    int x = 0, y = 0;
    if(ChartTimePriceToXY(0, 0, RightAnchor(), price, x, y))
      {
-      // v1.08b：挂单按钮宽 120，右边缘与 CALL/COLUMN 右边缘对齐（w-8），左 X = g_btnX - 20
-      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX - 20);
-      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 11);
+      // v1.08b：挂单按钮宽 120，右边缘与 CALL/COLUMN 右边缘对齐（w-8），左 X = g_btnX - UI(20)
+      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX - UI(20));
+      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - UI(11));
      }
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    color bg = (dir == DIR_UP) ? CLR_BUY_BG : ((dir == DIR_DOWN) ? CLR_SELL_BG : CLR_FLAT_BG);
@@ -410,8 +420,8 @@ void UpdateLabelRight(string name, double price, string text)
    if(ObjectFind(0, name) < 0) return;
    int x = 0, y = 0;
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), price, x, y)) return;
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX + 100);  // 右边缘 = w-8，与按钮列右对齐
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - 2);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, g_btnX + UI(100));  // 右边缘 = w-UI(8)，与按钮列右对齐
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - UI(2));
    ObjectSetString(0, name, OBJPROP_TEXT, text);
   }
 
@@ -430,8 +440,8 @@ void UpdateSwapButton(int dir)
    int x = 0, y = 0;
    double topPrice = MathMax(g_p1, g_p0);
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - 80) / 2);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y + 4);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - UI(80)) / 2);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y + UI(4));
   }
 
 // v1.13: ADJUST 按钮位置 (在 SWAP 右侧 4px)
@@ -444,9 +454,9 @@ void UpdateAdjustButton()
    int x = 0, y = 0;
    double topPrice = MathMax(g_p1, g_p0);
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
-   // SWAP 位置 = (w-80)/2, ADJUST 宽 80, 间距 4 → ADJUST 左 X = SWAP 左 X + SWAP 宽 + 4
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - 80) / 2 + 84);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y + 4);
+   // SWAP 位置 = (w-UI(80))/2, ADJUST 宽 UI(80), 间距 UI(4) → ADJUST 左 X = SWAP 左 X + SWAP 宽 + 间距
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - UI(80)) / 2 + UI(84));
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y + UI(4));
   }
 
 //+------------------------------------------------------------------+
@@ -464,11 +474,11 @@ bool CreateStepButton(double ratio, int dir)
    string name = StepName(ratio, dir);
    if(!ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0)) return false;
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_XSIZE, STEP_BTN_W);
-   ObjectSetInteger(0, name, OBJPROP_YSIZE, STEP_BTN_H);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, UI(STEP_BTN_W));
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, UI(STEP_BTN_H));
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 7);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, UI(7));
    ObjectSetInteger(0, name, OBJPROP_COLOR, CLR_STEP_TXT);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, CLR_STEP_BG);
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
@@ -508,8 +518,15 @@ void UpdateStepButton(double ratio, int dir)
    int x = 0, y = 0;
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), price, x, y)) return;
 
-   int xUp   = STEP_BTN_X;
-   int xDown = STEP_BTN_X + STEP_BTN_DN_OFFSET;
+   // v1.27: STEP 按钮几何按 UI 缩放 (运行期计算, 因 STEP_BTN_* 是编译期宏)
+   int btnW = UI(STEP_BTN_W);
+   int btnH = UI(STEP_BTN_H);
+   int gap  = UI(STEP_BTN_GAP);
+   int x0   = UI(STEP_BTN_X);
+   int off  = btnW + gap;
+
+   int xUp   = x0;
+   int xDown = x0 + off;
    int btnX  = (dir > 0) ? xUp : xDown;
 
    double topPrice = MathMax(g_p1, g_p0);
@@ -520,17 +537,17 @@ void UpdateStepButton(double ratio, int dir)
    if(MathAbs(price - topPrice) < eps)
      {
       // 视觉高端: 按钮位于该线下方 (避开上方 K 线)
-      btnY = y + 2;
+      btnY = y + UI(2);
      }
    else if(MathAbs(price - botPrice) < eps)
      {
       // 视觉低端: 按钮位于该线上方 (避开底部 HIDE)
-      btnY = y - STEP_BTN_H - 2;
+      btnY = y - btnH - UI(2);
      }
    else
      {
       // 中间线 (0.79 / 0.49): 按钮中心与线对齐, 线穿过两按钮中心
-      btnY = y - STEP_BTN_H / 2;
+      btnY = y - btnH / 2;
      }
 
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, btnX);
@@ -675,7 +692,7 @@ void UpdateTopButtons()
    double topPrice = MathMax(g_p1, g_p0);
    int x = 0, y = 0;
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
-   int yBtn = y + 4;
+   int yBtn = y + UI(4);
 
    string cancelName = CancelPendingName();
    if(ObjectFind(0, cancelName) >= 0)
@@ -694,22 +711,21 @@ void UpdateBottomButtons()
    double botPrice = MathMin(g_p1, g_p0);
    int x = 0, y = 0;
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), botPrice, x, y)) return;
-   int yBtn = y - 26; if(yBtn < 0) yBtn = 0;
+   int yBtn = y - UI(26); if(yBtn < 0) yBtn = 0;
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
 
-   // MARKET 居中位置 (宽 110)
-   int marketW = 110;
+   // MARKET 居中位置 (宽 110, v1.27 UI 缩放)
+   int marketW = UI(110);
    int marketX = (w - marketW) / 2;
 
    // 左侧 HIDE / RISK
    // v1.22: HIDE / RISK 右移到 STEP 按钮 (X=[6, 52]) 右侧, 避免 long 模式
    //   0.00 在底部时与 0.00 STEP 按钮 Y 重叠
    //   STEP 按钮范围 X=[STEP_BTN_X, STEP_BTN_X + STEP_BTN_DN_OFFSET + STEP_BTN_W]
-   //                      = [6, 6+24+22] = [6, 52]
-   //   留 8px 间隔 → HIDE X=60, RISK X=60+80+4=144
-   int xStepRight = STEP_BTN_X + STEP_BTN_DN_OFFSET + STEP_BTN_W;  // 52
-   int xHide      = xStepRight + 8;                                // 60
-   int xRisk      = xHide + 80 + 4;                                // 144
+   // v1.27: 全部按 UI 缩放
+   int stepBox = UI(STEP_BTN_X) + (UI(STEP_BTN_W) + UI(STEP_BTN_GAP)) + UI(STEP_BTN_W); // 缩放后的 STEP 列右边缘
+   int xHide   = stepBox + UI(8);                                 // HIDE 左 X
+   int xRisk   = xHide + UI(80) + UI(4);                          // RISK 左 X
    if(ObjectFind(0, HideName()) >= 0)
      {
       ObjectSetInteger(0, HideName(), OBJPROP_XDISTANCE, xHide);
@@ -734,14 +750,14 @@ void UpdateBottomButtons()
    if(ObjectFind(0, PnLLeftName()) >= 0)
      {
       ObjectSetInteger(0, PnLLeftName(), OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
-      ObjectSetInteger(0, PnLLeftName(), OBJPROP_XDISTANCE, marketX - 6);
-      ObjectSetInteger(0, PnLLeftName(), OBJPROP_YDISTANCE, yBtn + 4);
+      ObjectSetInteger(0, PnLLeftName(), OBJPROP_XDISTANCE, marketX - UI(6));
+      ObjectSetInteger(0, PnLLeftName(), OBJPROP_YDISTANCE, yBtn + UI(4));
      }
    if(ObjectFind(0, PnLRightName()) >= 0)
      {
       ObjectSetInteger(0, PnLRightName(), OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-      ObjectSetInteger(0, PnLRightName(), OBJPROP_XDISTANCE, marketX + marketW + 6);
-      ObjectSetInteger(0, PnLRightName(), OBJPROP_YDISTANCE, yBtn + 4);
+      ObjectSetInteger(0, PnLRightName(), OBJPROP_XDISTANCE, marketX + marketW + UI(6));
+      ObjectSetInteger(0, PnLRightName(), OBJPROP_YDISTANCE, yBtn + UI(4));
      }
 
    // 右侧 EVEN / CHALF / CALL（CALL 最右，左 X = g_btnX）
@@ -752,12 +768,12 @@ void UpdateBottomButtons()
      }
    if(ObjectFind(0, CloseHalfName()) >= 0)
      {
-      ObjectSetInteger(0, CloseHalfName(), OBJPROP_XDISTANCE, g_btnX - 100 - 4);
+      ObjectSetInteger(0, CloseHalfName(), OBJPROP_XDISTANCE, g_btnX - UI(100) - UI(4));
       ObjectSetInteger(0, CloseHalfName(), OBJPROP_YDISTANCE, yBtn);
      }
    if(ObjectFind(0, EvenName()) >= 0)
      {
-      ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, g_btnX - 100 - 4 - 80 - 4);  // v1.25: g_btnX-188, 与 CHALF/CALL 等距 4px
+      ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, g_btnX - UI(100) - UI(4) - UI(80) - UI(4));  // v1.25: 与 CHALF/CALL 等距 4px
       ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yBtn);
      }
   }
@@ -1793,6 +1809,14 @@ int OnInit()
   {
    // v1.15: prefix 增加 _Period, 减少 MT5 ChartID 复用导致的跨周期状态串扰
    g_prefix = "FLA_" + IntegerToString(ChartID()) + "_" + _Symbol + "_" + EnumToString(_Period) + "_";
+
+   // v1.27: 计算 UI 缩放系数 — 手动值优先, 0 则按屏幕 DPI/96 自动
+   if(InpUIScale > 0.01)
+      g_uiScale = InpUIScale;
+   else
+      g_uiScale = TerminalInfoInteger(TERMINAL_SCREEN_DPI) / 96.0;
+   if(g_uiScale < 0.2) g_uiScale = 0.2;   // 下限保护
+   if(g_uiScale > 3.0) g_uiScale = 3.0;   // 上限保护
 
    // v1.12: 自动探测服务器时区 (用于 CE(S)T 切日换算)
    DetectTimezone();

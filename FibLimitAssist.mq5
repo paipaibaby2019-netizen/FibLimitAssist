@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.34"
+#property version   "1.35"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -21,7 +21,7 @@
 #property description "· v1.31 新增 BUY/SELL STOP 突破挂单按钮 (在 MKT 右侧 slack 区): long=绿挂视觉 top+1tick, short=红挂视觉 bot-1tick, SL/TP/lot 与 MKT 一致"
 #property description "· v1.32 STOP/MKT 关于底线镜像对称 (MKT 上方 4px, STOP 下方 4px); STOP 不再抢占 g_btnX (恢复 CALL/CHALF/EVEN/CANCEL/挂单按钮/PnL 标签右对齐)"
 #property description "· v1.33 按钮文字缩短: BUY STOP→BUY STP, SELL STOP→SELL STP (修正 v1.33 漏掉的 #property version bump)"
-#property description "· v1.34 底线下新增盈亏比标签 (右对齐 CALL 右边缘, 关于底线上对衬): (1.4:3.2) NN%, 1.4=∑浮盈/∑止盈 (绿/红/灰), 3.2=∑止盈/∑止损 (saddle brown), NN%=1.4/3.2*100 四舍五入"
+#property description "· v1.35 盈亏比标签接入 OnTick 平时分支 — 浮盈/止盈止损金额每个 tick 实时刷新 (与 PnL 数字同节奏, 不等新柱)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -2152,7 +2152,7 @@ void OnTick()
    if(bt != lastBarTime) { lastBarTime = bt; g_dirty = true; }
 
    if(g_dirty) { RefreshAll(); g_dirty = false; }
-   else        { UpdatePnLDisplay(); ChartRedraw(0); }   // v1.08：每个 tick 刷新 MKT 两侧的实时盈亏
+   else        { UpdatePnLDisplay(); UpdateRatioLabels(); ChartRedraw(0); }   // v1.08 PnL + v1.35 盈亏比 — 每个 tick 都刷新, 不等新柱
   }
 
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)

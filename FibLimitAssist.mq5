@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.32"
+#property version   "1.34"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -20,6 +20,8 @@
 #property description "· v1.30 STEP 按钮调整端点 (1.00/0.00) 时, 中间线 0.79/0.49 也按比例跟随 (与鼠标拖动端点行为一致)"
 #property description "· v1.31 新增 BUY/SELL STOP 突破挂单按钮 (在 MKT 右侧 slack 区): long=绿挂视觉 top+1tick, short=红挂视觉 bot-1tick, SL/TP/lot 与 MKT 一致"
 #property description "· v1.32 STOP/MKT 关于底线镜像对称 (MKT 上方 4px, STOP 下方 4px); STOP 不再抢占 g_btnX (恢复 CALL/CHALF/EVEN/CANCEL/挂单按钮/PnL 标签右对齐)"
+#property description "· v1.33 按钮文字缩短: BUY STOP→BUY STP, SELL STOP→SELL STP (修正 v1.33 漏掉的 #property version bump)"
+#property description "· v1.34 底线下新增盈亏比标签 (右对齐 CALL 右边缘, 关于底线上对衬): (1.4:3.2) NN%, 1.4=∑浮盈/∑止盈 (绿/红/灰), 3.2=∑止盈/∑止损 (saddle brown), NN%=1.4/3.2*100 四舍五入"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -76,6 +78,15 @@ input double InpFontScale = 0.0;  // [UI] 字号缩放系数 (0=按平台智能�
 #define CLR_RISK_LOW C'76,175,80'    // RISK 0.5% 低风险（绿）
 #define CLR_RISK_MID C'255,193,7'    // RISK 1%   中风险（黄）
 #define CLR_RISK_HI  C'244,67,54'    // RISK 2%   高风险（红）
+
+// v1.34 新增：盈亏比标签三色
+//  1.4  = 合计浮盈 / 合计止盈 (正值=已捕获止盈份额, 负值=整体亏损中) — 正绿/负红/零灰
+//  3.2  = 合计止盈 / 合计止损 (风险回报比, 永远正)            — 褐色
+//  50%  = 1.4 / 3.2 的比值                                    — 中性灰
+#define CLR_RATIO_PLUS   C'76,175,80'   // 浮盈占比 正 (绿, 与 CLR_BUY_BG 一致)
+#define CLR_RATIO_MINUS  C'244,67,54'   // 浮盈占比 负 (红, 与 CLR_SELL_BG 一致)
+#define CLR_RATIO_NEUTRAL C'140,140,140'// 浮盈占比 0 或无持仓 (灰, 与 CLR_FLAT_BG 一致)
+#define CLR_RATIO_RR     C'139,90,43'   // 风险回报比 (标准 saddle brown)
 
 // v1.08 新增：P/L 数字标签颜色
 #define CLR_PLUS        C'0,150,60'   // 盈利（绿，带 +）
@@ -290,8 +301,12 @@ string PnLRightName()      { return g_prefix + "PNLR"; }
 string RiskName()          { return g_prefix + "RISK"; }
 // 市价下单按钮对象名
 string MarketName()        { return g_prefix + "MARKET"; }
-// v1.31：突破挂单按钮对象名 (BUY STOP / SELL STOP)
+// v1.31：突破挂单按钮对象名 (BUY STP / SELL STP)
 string StopName()          { return g_prefix + "STOP"; }
+// v1.34：盈亏比标签 (3 段 OBJ_LABEL: A=含(的浮盈占比, B=含:)的止盈/止损比, C=百分比)
+string RatioAName()        { return g_prefix + "RATIO_A"; }
+string RatioBName()        { return g_prefix + "RATIO_B"; }
+string RatioCName()        { return g_prefix + "RATIO_C"; }
 // 隐藏/显示按钮对象名 (始终显示，不会随 g_hidden 隐藏)
 string HideName()          { return g_prefix + "HIDE"; }
 // v1.13: 一键调整 1.00/0.00 到最近高低点的按钮对象名
@@ -393,6 +408,10 @@ void CreateObjects()
    // v1.08：MKT 两侧的实时盈亏数字标签（OBJ_LABEL 像素定位）
    CreatePnLLabel(PnLLeftName());
    CreatePnLLabel(PnLRightName());
+   // v1.34: 盈亏比标签 — 3 段 (浮盈占比 + 风险回报比 + 百分比), 颜色不同需独立对象
+   CreatePnLLabel(RatioAName());
+   CreatePnLLabel(RatioBName());
+   CreatePnLLabel(RatioCName());
 
    CreateLabelRight(LName(RATIO_021), "0.21", CLR_DECO);
 
@@ -959,6 +978,7 @@ void RefreshAll()
    UpdateTopButtons();
    UpdateBottomButtons();
    UpdatePnLDisplay();   // v1.08：MKT 两侧的实时盈亏数字
+   UpdateRatioLabels();  // v1.34：底线下方的盈亏比三指标 (浮盈占比/风险回报比/百分比)
 
    UpdateLabelRight(LName(RATIO_021), TheoPrice(RATIO_021, g_p1, g_p0), "0.21");  // v1.07：仅保留 0.21 标签
 
@@ -1216,6 +1236,125 @@ void UpdatePnLDisplay()
      {
       ObjectSetString(0, PnLRightName(), OBJPROP_TEXT, FormatPnL(d));
       ObjectSetInteger(0, PnLRightName(), OBJPROP_COLOR, PnLColor(d));
+     }
+  }
+
+// v1.34: 盈亏比三指标 — 浮盈占比 / 风险回报比 / 百分比
+//   valA = ∑浮盈 / ∑止盈金额   (可正可负, 0 表示无仓位或无 TP 设置)
+//   valB = ∑止盈金额 / ∑止损金额 (恒正, 0 表示无 TP/SL 设置)
+//   pct  = valA/valB * 100, 四舍五入 (valB=0 时取 0)
+void CalcRatioMetrics(double &valA, double &valB, double &pct)
+  {
+   valA = 0; valB = 0; pct = 0;
+
+   double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   if(tickSize <= 0) return;   // 防止除零
+
+   double totalPL = 0, totalTP = 0, totalSL = 0;
+   int total = PositionsTotal();
+   for(int i = 0; i < total; i++)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+
+      double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+      double tp    = PositionGetDouble(POSITION_TP);
+      double sl    = PositionGetDouble(POSITION_SL);
+      double lots  = PositionGetDouble(POSITION_VOLUME);
+      ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+
+      totalPL += PositionGetDouble(POSITION_PROFIT);  // 已含手续费/库存费
+
+      if(tp > 0)
+        {
+         double dist = (type == POSITION_TYPE_BUY) ? (tp - entry) : (entry - tp);
+         if(dist > 0) totalTP += (dist / tickSize) * tickValue * lots;
+        }
+      if(sl > 0)
+        {
+         double dist = (type == POSITION_TYPE_BUY) ? (entry - sl) : (sl - entry);
+         if(dist > 0) totalSL += (dist / tickSize) * tickValue * lots;
+        }
+     }
+
+   if(totalTP > 0) valA = totalPL / totalTP;
+   if(totalSL > 0) valB = totalTP / totalSL;
+   if(valB  > 0) pct = valA / valB * 100.0;
+  }
+
+// v1.34: 盈亏比标签刷新 — 3 段 OBJ_LABEL, 右对齐到 CALL 右边缘 (g_btnX + UI(100))
+//   Y = botPrice + UI(4), 与 CALL (botPrice 上方 UI(26)) 关于底线下上镜像
+void UpdateRatioLabels()
+  {
+   double botPrice = MathMin(g_p1, g_p0);
+   int x = 0, y = 0;
+   if(!ChartTimePriceToXY(0, 0, RightAnchor(), botPrice, x, y)) return;
+
+   double valA = 0, valB = 0, pct = 0;
+   CalcRatioMetrics(valA, valB, pct);
+
+   // 文本与配色
+   string txtA = (valA >= 0)
+                 ? StringFormat("(%+.1f",  valA)   // (+1.4
+                 : StringFormat("(%+.1f",  valA);   // (-0.5, + 已带负号
+   string txtB = StringFormat(":%+.1f)", valB);    // (:3.2)  valB 恒正
+   string txtC = StringFormat(" %d%%",   (int)MathRound(pct));
+
+   color clrA = (valA >  0) ? CLR_RATIO_PLUS
+                :((valA < 0) ? CLR_RATIO_MINUS : CLR_RATIO_NEUTRAL);
+   color clrB = (valB >  0) ? CLR_RATIO_RR    : CLR_RATIO_NEUTRAL;
+   color clrC = CLR_RATIO_NEUTRAL;
+
+   string nameA = RatioAName(), nameB = RatioBName(), nameC = RatioCName();
+
+   // 先写文本/颜色, 渲染一次让 XSIZE 反映真实宽度
+   if(ObjectFind(0, nameA) >= 0)
+     {
+      ObjectSetString(0, nameA, OBJPROP_TEXT, txtA);
+      ObjectSetInteger(0, nameA, OBJPROP_COLOR, clrA);
+     }
+   if(ObjectFind(0, nameB) >= 0)
+     {
+      ObjectSetString(0, nameB, OBJPROP_TEXT, txtB);
+      ObjectSetInteger(0, nameB, OBJPROP_COLOR, clrB);
+     }
+   if(ObjectFind(0, nameC) >= 0)
+     {
+      ObjectSetString(0, nameC, OBJPROP_TEXT, txtC);
+      ObjectSetInteger(0, nameC, OBJPROP_COLOR, clrC);
+     }
+
+   // 测宽度, 失败时按字长估算
+   int wC = (int)ObjectGetInteger(0, nameC, OBJPROP_XSIZE);
+   int wB = (int)ObjectGetInteger(0, nameB, OBJPROP_XSIZE);
+   int wA = (int)ObjectGetInteger(0, nameA, OBJPROP_XSIZE);
+   if(wC == 0) wC = StringLen(txtC) * UI(6);
+   if(wB == 0) wB = StringLen(txtB) * UI(6);
+   if(wA == 0) wA = StringLen(txtA) * UI(6);
+
+   int rightEdge = g_btnX + UI(100);
+   int yBtn = y + UI(4);   // 底线下 4px (CALL 在 y - 26 = 上方 26px, 关于底线上 4px 镜像)
+
+   // C 最右, B 贴 C 左, A 贴 B 左 (三段共用顶 Y)
+   if(ObjectFind(0, nameC) >= 0)
+     {
+      ObjectSetInteger(0, nameC, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+      ObjectSetInteger(0, nameC, OBJPROP_XDISTANCE, rightEdge - wC);
+      ObjectSetInteger(0, nameC, OBJPROP_YDISTANCE, yBtn);
+     }
+   if(ObjectFind(0, nameB) >= 0)
+     {
+      ObjectSetInteger(0, nameB, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+      ObjectSetInteger(0, nameB, OBJPROP_XDISTANCE, rightEdge - wC - wB);
+      ObjectSetInteger(0, nameB, OBJPROP_YDISTANCE, yBtn);
+     }
+   if(ObjectFind(0, nameA) >= 0)
+     {
+      ObjectSetInteger(0, nameA, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+      ObjectSetInteger(0, nameA, OBJPROP_XDISTANCE, rightEdge - wC - wB - wA);
+      ObjectSetInteger(0, nameA, OBJPROP_YDISTANCE, yBtn);
      }
   }
 

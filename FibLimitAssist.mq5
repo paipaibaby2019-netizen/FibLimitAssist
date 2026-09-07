@@ -827,14 +827,12 @@ void UpdateBottomButtons()
       ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yBtn);
      }
 
-   // v1.31: BUY/SELL STOP 按钮 — 紧邻 EVEN 左侧 (gap 6), 宽 110 与 MARKET 同尺寸
-   //   g_btnX - 100 - 4 - 80 - 4 = g_btnX - 188 (EVEN 左) - 6 (gap) - 110 (STOP) = g_btnX - 304
-   // v1.32: Y 改到 botPrice + UI(4), 与 MARKET (y - UI(26), 顶边距底线 4px) 关于底线 (MathMin) 镜像对称
+   // v1.32: BUY/SELL STOP 按钮 — 与 MARKET 同宽、同中心、关于底线镜像对称
+   //  MARKET: 顶边距底线 4px 上方 (yBtn = y - 26)
+   //  STOP:   顶边距底线 4px 下方 (y + 4)
    if(ObjectFind(0, StopName()) >= 0)
      {
-      int stopW = UI(110);
-      int xStop = g_btnX - UI(100) - UI(4) - UI(80) - UI(4) - UI(6) - stopW;
-      ObjectSetInteger(0, StopName(), OBJPROP_XDISTANCE, xStop);
+      ObjectSetInteger(0, StopName(), OBJPROP_XDISTANCE, marketX);  // 与 MARKET 同 X 中心
       ObjectSetInteger(0, StopName(), OBJPROP_YDISTANCE, y + UI(4));
      }
   }

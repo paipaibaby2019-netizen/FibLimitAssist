@@ -890,7 +890,7 @@ void UpdateStopButton(int dir)
   {
    string name = StopName();
    if(ObjectFind(0, name) < 0) return;
-   string t = (dir == DIR_UP) ? "BUY STOP" : ((dir == DIR_DOWN) ? "SELL STOP" : "--");
+   string t = (dir == DIR_UP) ? "BUY STP" : ((dir == DIR_DOWN) ? "SELL STP" : "--");
    color bg = (dir == DIR_UP) ? CLR_BUY_BG : ((dir == DIR_DOWN) ? CLR_SELL_BG : CLR_FLAT_BG);
    ObjectSetString(0, name, OBJPROP_TEXT, t);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);

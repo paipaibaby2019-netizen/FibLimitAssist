@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.38"
+#property version   "1.39"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -23,7 +23,7 @@
 #property description "· v1.33 按钮文字缩短: BUY STOP→BUY STP, SELL STOP→SELL STP (修正 v1.33 漏掉的 #property version bump)"
 #property description "· v1.35 盈亏比标签接入 OnTick 平时分支 — 浮盈/止盈止损金额每个 tick 实时刷新 (与 PnL 数字同节奏, 不等新柱)"
 #property description "· v1.36 端点位置按周期记忆 (临时全局变量 GlobalVariableTemp, 含 Period 天然按周期隔离, 重启清空); 同步 risk 持久化为临时 (修复文档/实现不一致)"
-#property description "· v1.38 默认斐波那契区间改用最近 N 根已收盘 bar 高低点 (数据驱动), 修复切周期 ChartGetDouble(MAX/MIN) 返回 0/过窄导致线条挤死/跑出屏; LoadFibPositions 加跨度校验"
+#property description "· v1.39 移除 kernel32.dll 依赖, 改用纯路径判断 Wine (EA 不再需勾选 Allow DLL imports, 服务器禁用 DLL 也能用)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -142,26 +142,19 @@ long     g_lastStepTimeMs   = 0;
 #define  STEP_DBLCLICK_MS   300
 
 //---------------------------- 工具函数 -----------------------------//
-// v1.29: 导入 kernel32.dll 的 GetLogicalDrives 用于探测 Wine 的 Z: 盘
-//   (仅读取逻辑盘位掩码, 无副作用; 若终端禁用 DLL 导入则返回 0, 由 path 兜底检测接住)
-#import "kernel32.dll"
-   uint GetLogicalDrives(void);
-#import
-
-// v1.29: 判断当前是否为 Wine 环境 (macOS/Linux 上通过 Wine 运行的 MT5)
-//   背景: v1.28 用 StringFind(TERMINAL_DATA_PATH,"\\") 判 Windows, 但 Wine 版数据路径同样含 '\\',
-//         导致 mac(Wine) 被误判为 Windows → 按钮被错误缩放到 0.6
-//   信号1: Wine 默认把 Unix 根 "/" 映射为 Z: 盘, 原生 Windows 几乎不会分配 Z 盘 (bit25)
-//   信号2(兜底, DLL 被禁用时): Wine 官方版是便携模式, 数据目录在 "Program Files" 下; 原生 Windows 标准安装数据目录在 "AppData" 下
+// v1.39: 移除 kernel32.dll 依赖 — 改用纯路径判断 Wine (EA 不再需要勾选 Allow DLL imports)
+//   v1.29 曾用 #import "kernel32.dll" 的 GetLogicalDrives() 探测 Z: 盘, 导致 EA 依赖 DLL,
+//   MT5 属性/Dependencies 里提示 kernel32.dll 并需勾选 Allow DLL imports (账户禁用 DLL 时无法加载)
+//   纯路径信号(可靠): Wine 官方版(含 mac 打包)是便携模式, 数据目录在 "Program Files" 下;
+//                     原生 Windows 标准安装数据目录在 "AppData\Roaming\MetaQuotes\Terminal" 下
 bool IsWine()
   {
-   uint drives = GetLogicalDrives();                 // 若 DLL 被禁用, 返回 0
-   if(drives != 0 && (drives & (1u << 25)) != 0)     // bit25 = Z 盘
-      return true;
    string dp = TerminalInfoString(TERMINAL_DATA_PATH);
-   if(StringFind(dp, "Program Files") >= 0 && StringFind(dp, "AppData") < 0)
-      return true;
-   return false;
+   if(StringFind(dp, "AppData") >= 0)
+      return false;                // 原生 Windows 标准安装
+   if(StringFind(dp, "Program Files") >= 0)
+      return true;                 // Wine 便携(mac/Linux)
+   return false;                   // 无法判断时保守按 Windows (mac 必命中 Program Files, 不会误判)
   }
 
 // 对象命名：按比例生成唯一名称

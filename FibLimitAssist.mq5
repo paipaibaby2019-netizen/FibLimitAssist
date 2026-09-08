@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.36"
+#property version   "1.38"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -22,6 +22,8 @@
 #property description "· v1.32 STOP/MKT 关于底线镜像对称 (MKT 上方 4px, STOP 下方 4px); STOP 不再抢占 g_btnX (恢复 CALL/CHALF/EVEN/CANCEL/挂单按钮/PnL 标签右对齐)"
 #property description "· v1.33 按钮文字缩短: BUY STOP→BUY STP, SELL STOP→SELL STP (修正 v1.33 漏掉的 #property version bump)"
 #property description "· v1.35 盈亏比标签接入 OnTick 平时分支 — 浮盈/止盈止损金额每个 tick 实时刷新 (与 PnL 数字同节奏, 不等新柱)"
+#property description "· v1.36 端点位置按周期记忆 (临时全局变量 GlobalVariableTemp, 含 Period 天然按周期隔离, 重启清空); 同步 risk 持久化为临时 (修复文档/实现不一致)"
+#property description "· v1.38 默认斐波那契区间改用最近 N 根已收盘 bar 高低点 (数据驱动), 修复切周期 ChartGetDouble(MAX/MIN) 返回 0/过窄导致线条挤死/跑出屏; LoadFibPositions 加跨度校验"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -47,6 +49,9 @@ input int InpAdjustBackstep  = 3;   // [ADJUST] 候选最小时间距离 (单位
 
 // v1.17 新增: 1.00/0.00/0.79/0.49 线上 UP/DOWN 按钮 - 单击步长 = swing 区间 × (InpStepPercent)%, 双击 ×10
 input double InpStepPercent  = 1.0; // [STEP] 单击移动步长占 swing 区间百分比 (%); 双击同按钮 300ms 内 = ×10
+
+// v1.38 新增: 默认斐波那契区间基准 — 最近 N 根已收盘 K 线的高低点 (数据驱动, 解决切周期时 ChartGetDouble(CHART_PRICE_MAX/MIN) 返回 0 或过窄导致线条挤死/跑出屏)
+input int InpDefaultSpanBars = 60; // [默认区间] 用最近多少根已收盘 bar 的 High/Low 作为默认区间 (0=不用, 恢复旧视图基准)
 
 // v1.27 新增: UI 界面缩放系数 (统一缩放所有按钮/标签的尺寸与间距)
 //   Mac/Wine 版或 96DPI 屏幕用 1.0; 远程 Windows 服务器按钮过大时, 调小 (如 0.6~0.8)
@@ -243,7 +248,10 @@ bool LoadFibPositions()
       return false;   // 端点缺失 → 视为首次, 走默认初始化
    g_p1 = GlobalVariableGet(g_prefix + "p1");
    g_p0 = GlobalVariableGet(g_prefix + "p0");
-   if(g_p1 <= 0 || g_p0 <= 0 || g_p1 == g_p0)
+   // v1.38: 加强校验 — 端点须为有效正价且跨度足够(≥max(10点, 价格×0.2%)), 否则视为异常残留走默认
+   //   目的: 拒绝旧版本 ChartGetDouble 兜底时产生的"挤死"位置(|p1-p0|≈spread 几个点)
+   double minSpan = MathMax(10 * _Point, MathMax(g_p1, g_p0) * 0.002);
+   if(g_p1 <= 0 || g_p0 <= 0 || MathAbs(g_p1 - g_p0) < minSpan)
       return false;   // 无效值(异常残留) → 走默认初始化
    // 中间线: 有单独记忆则恢复(用户可能拖过偏离理论值), 否则按端点理论值补齐
    if(GlobalVariableCheck(g_prefix + "p79")) g_p79 = GlobalVariableGet(g_prefix + "p79");
@@ -2136,21 +2144,43 @@ int OnInit()
    // v1.12: 自动探测服务器时区 (用于 CE(S)T 切日换算)
    DetectTimezone();
 
-   // v1.36: 端点位置按周期记忆 — 先尝试恢复上次位置, 无记忆才用可见区间生成默认
+   // v1.36: 端点位置按周期记忆 — 先尝试恢复上次位置, 无记忆才用数据驱动的默认区间
    if(!LoadFibPositions())
      {
-      // 首次(或重启后清空): 用当前可见价格区间重新生成默认 fib
-      double pmax = ChartGetDouble(0, CHART_PRICE_MAX, 0);
-      double pmin = ChartGetDouble(0, CHART_PRICE_MIN, 0);
-      if(pmax <= pmin || pmin <= 0)
+      // v1.38: 首次(或重启后清空): 用最近 N 根已收盘 bar 的 High/Low 作为默认区间
+      //   不再用 ChartGetDouble(CHART_PRICE_MAX/MIN) — 那是"视图窗口"属性, 切换周期瞬间
+      //   可能返回 0/0 (D1 挤死) 或过窄/错位区间 (M30/M15/M5/M1 跑出屏幕), 均不可靠
+      double hi = 0.0, lo = 0.0;
+      int bars = MathMax(1, InpDefaultSpanBars);
+      int total = Bars(_Symbol, _Period);
+      if(total > 0)
         {
-         pmax = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         pmin = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         if(pmax <= pmin) { double c = pmin; pmax = c + 100 * _Point; pmin = c - 100 * _Point; }
+         int avail = MathMin(bars, total - 1);   // 留最后 1 根(当前未收盘)不计入, 从 shift=1 扫
+         for(int i = 1; i <= avail; i++)
+           {
+            double h = iHigh(_Symbol, _Period, i);
+            double l = iLow(_Symbol, _Period, i);
+            if(h <= 0 || l <= 0) continue;          // 忽略缺失数据(历史未载入)
+            if(hi == 0.0 || h > hi) hi = h;
+            if(lo == 0.0 || l < lo) lo = l;
+           }
         }
-      double span = pmax - pmin;
-      g_p1  = pmin + span * 0.1;
-      g_p0  = pmax - span * 0.1;
+
+      // 兜底: 若拿不到有效高低点(数据不足/异常), 退化为当前价 ±2% 对称区间
+      if(hi <= 0 || lo <= 0 || hi <= lo)
+        {
+         double mid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         if(mid <= 0) mid = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+         double half = mid * 0.02;
+         if(mid <= 0) { mid = 1.0; half = 1.0; }   // 极端情况保护, 绝不 0 价
+         lo = mid - half;
+         hi = mid + half;
+        }
+
+      double span = hi - lo;
+      if(span < 10 * _Point) span = 10 * _Point;    // 最小 span 保护(10 点), 防挤死
+      g_p1  = lo + span * 0.1;
+      g_p0  = hi - span * 0.1;
       g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
       g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
      }

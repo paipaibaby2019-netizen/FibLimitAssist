@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.35"
+#property version   "1.36"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -213,17 +213,43 @@ int LeftShift()
   }
 
 //---------------------------- 状态持久化 ---------------------------//
-// 使用非临时全局变量：会话内(切换周期/缩放)保留，MT5 重启后自动清空
-// v1.15: 1.00/0.00/0.79/0.49 位置不再记忆, 每次插入完全重新初始化
-//        仅保留风险档位 (g_riskPercent) 会话内持久
+// 使用临时全局变量 (GlobalVariableTemp)：会话内(切换周期/缩放)保留，MT5 重启后自动清空
+// v1.15: 移除端点位置记忆 → v1.36 恢复为"按周期记忆"(每个周期独立记忆自己的线条位置)
+// v1.36: g_prefix 已含 _Period, 天然按周期隔离, 切走再切回同周期可恢复位置
 void SaveRisk()
   {
+   GlobalVariableTemp(g_prefix + "risk");   // 临时变量, 重启清空
    GlobalVariableSet(g_prefix + "risk", g_riskPercent);
   }
 bool LoadRisk()
   {
    if(!GlobalVariableCheck(g_prefix + "risk")) return false;
    g_riskPercent = GlobalVariableGet(g_prefix + "risk");
+   return true;
+  }
+
+// v1.36: 端点/挂单线位置按周期记忆 (临时全局变量, 会话内持久, 重启清空)
+//   切周期时 OnDeinit 保存 → 重新 OnInit 时恢复; 同周期切回恢复上次调整的位置
+void SaveFibPositions()
+  {
+   GlobalVariableTemp(g_prefix + "p1");   GlobalVariableSet(g_prefix + "p1",  g_p1);
+   GlobalVariableTemp(g_prefix + "p0");   GlobalVariableSet(g_prefix + "p0",  g_p0);
+   GlobalVariableTemp(g_prefix + "p79");  GlobalVariableSet(g_prefix + "p79", g_p79);
+   GlobalVariableTemp(g_prefix + "p49");  GlobalVariableSet(g_prefix + "p49", g_p49);
+  }
+bool LoadFibPositions()
+  {
+   if(!GlobalVariableCheck(g_prefix + "p1") || !GlobalVariableCheck(g_prefix + "p0"))
+      return false;   // 端点缺失 → 视为首次, 走默认初始化
+   g_p1 = GlobalVariableGet(g_prefix + "p1");
+   g_p0 = GlobalVariableGet(g_prefix + "p0");
+   if(g_p1 <= 0 || g_p0 <= 0 || g_p1 == g_p0)
+      return false;   // 无效值(异常残留) → 走默认初始化
+   // 中间线: 有单独记忆则恢复(用户可能拖过偏离理论值), 否则按端点理论值补齐
+   if(GlobalVariableCheck(g_prefix + "p79")) g_p79 = GlobalVariableGet(g_prefix + "p79");
+   else                                      g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
+   if(GlobalVariableCheck(g_prefix + "p49")) g_p49 = GlobalVariableGet(g_prefix + "p49");
+   else                                      g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
    return true;
   }
 
@@ -2110,20 +2136,24 @@ int OnInit()
    // v1.12: 自动探测服务器时区 (用于 CE(S)T 切日换算)
    DetectTimezone();
 
-   // v1.15: 1.00/0.00 端点位置不再记忆, 每次插入都用当前可见价格区间重新生成默认 fib
-   double pmax = ChartGetDouble(0, CHART_PRICE_MAX, 0);
-   double pmin = ChartGetDouble(0, CHART_PRICE_MIN, 0);
-   if(pmax <= pmin || pmin <= 0)
+   // v1.36: 端点位置按周期记忆 — 先尝试恢复上次位置, 无记忆才用可见区间生成默认
+   if(!LoadFibPositions())
      {
-      pmax = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      pmin = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      if(pmax <= pmin) { double c = pmin; pmax = c + 100 * _Point; pmin = c - 100 * _Point; }
+      // 首次(或重启后清空): 用当前可见价格区间重新生成默认 fib
+      double pmax = ChartGetDouble(0, CHART_PRICE_MAX, 0);
+      double pmin = ChartGetDouble(0, CHART_PRICE_MIN, 0);
+      if(pmax <= pmin || pmin <= 0)
+        {
+         pmax = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+         pmin = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         if(pmax <= pmin) { double c = pmin; pmax = c + 100 * _Point; pmin = c - 100 * _Point; }
+        }
+      double span = pmax - pmin;
+      g_p1  = pmin + span * 0.1;
+      g_p0  = pmax - span * 0.1;
+      g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
+      g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
      }
-   double span = pmax - pmin;
-   g_p1  = pmin + span * 0.1;
-   g_p0  = pmax - span * 0.1;
-   g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
-   g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
 
    // 风险档位会话内持久
    LoadRisk();
@@ -2137,6 +2167,8 @@ int OnInit()
 
 void OnDeinit(const int reason)
   {
+   // v1.36: 切周期/移除前保存位置 (临时全局变量, 会话内持久, 重启自动清空)
+   SaveFibPositions();
    // 仅清除本实例图表对象；服务器挂单保留不动
    ObjectsDeleteAll(0, g_prefix, -1, -1);
    ChartRedraw(0);

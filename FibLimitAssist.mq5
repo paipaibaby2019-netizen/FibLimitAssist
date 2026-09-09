@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.40"
+#property version   "1.41"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -18,13 +18,14 @@
 #property description "· UI 缩放拆尺寸/字号: InpUIScale 缩按钮, InpFontScale 缩字号 (v1.28)"
 #property description "· v1.29 修复 Wine 误判: 平台检测改用 Z 盘/便携模式特征, mac(Wine) 不再被误当 Windows 缩放"
 #property description "· v1.30 STEP 按钮调整端点 (1.00/0.00) 时, 中间线 0.79/0.49 也按比例跟随 (与鼠标拖动端点行为一致)"
-#property description "· v1.31 新增 BUY/SELL STOP 突破挂单按钮 (在 MKT 右侧 slack 区): long=绿挂视觉 top+1tick, short=红挂视觉 bot-1tick, SL/TP/lot 与 MKT 一致"
-#property description "· v1.32 STOP/MKT 关于底线镜像对称 (MKT 上方 4px, STOP 下方 4px); STOP 不再抢占 g_btnX (恢复 CALL/CHALF/EVEN/CANCEL/挂单按钮/PnL 标签右对齐)"
-#property description "· v1.33 按钮文字缩短: BUY STOP→BUY STP, SELL STOP→SELL STP (修正 v1.33 漏掉的 #property version bump)"
-#property description "· v1.35 盈亏比标签接入 OnTick 平时分支 — 浮盈/止盈止损金额每个 tick 实时刷新 (与 PnL 数字同节奏, 不等新柱)"
-#property description "· v1.36 端点位置按周期记忆 (临时全局变量 GlobalVariableTemp, 含 Period 天然按周期隔离, 重启清空); 同步 risk 持久化为临时 (修复文档/实现不一致)"
-#property description "· v1.39 移除 kernel32.dll 依赖, 改用纯路径判断 Wine (EA 不再需勾选 Allow DLL imports, 服务器禁用 DLL 也能用)"
-#property description "· v1.40 新增交易信号提醒: 强势上涨→弱势回调(做多)/强势下跌→弱势反弹(做空) 形态识别 + 5维评分 + Alert(PC) + SendNotification(手机推送), 总开关默认关"
+#property description "· v1.31 新增 BUY/SELL STOP 突破挂单按钮 (MKT 右侧): long 挂 top+1tick, short 挂 bot-1tick, SL/TP/lot 与 MKT 一致"
+#property description "· v1.32 STOP/MKT 关于底线镜像对称; STOP 不再抢占 g_btnX (恢复右链按钮对齐)"
+#property description "· v1.33 按钮文字缩短: BUY STOP→BUY STP, SELL STOP→SELL STP"
+#property description "· v1.35 盈亏比标签接入 OnTick 平时分支, 每 tick 实时刷新"
+#property description "· v1.36 端点位置按周期记忆 (GlobalVariableTemp 临时变量, 重启清空)"
+#property description "· v1.39 移除 kernel32.dll 依赖, 改用纯路径判断 Wine (无需勾选 Allow DLL imports)"
+#property description "· v1.40 新增交易信号提醒: 强势上涨→弱势回调/强势下跌→弱势反弹 形态识别 + 5维评分 + Alert + 手机推送, 总开关默认关"
+#property description "· v1.41 修复 v1.40 编译错误: iATR() 返回 handle 需 CopyBuffer 取 ATR 值 (此前误作数值 4 参数调用导致 wrong parameters count)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -2198,8 +2199,17 @@ bool IsBottomFractal(int shift)
 // 检测周期 ATR (取不到时用当前价兜底)
 double SignalATR()
   {
-   double atr = iATR(_Symbol, InpSignalTF, InpSignalATRPeriod, 0);
-   if(atr <= 0) atr = iATR(_Symbol, InpSignalTF, InpSignalATRPeriod, 1);
+   // 注意: iATR() 返回的是 indicator handle(int), 不是 ATR 数值, 需用 CopyBuffer 取出
+   // 正确签名: int iATR(string symbol, ENUM_TIMEFRAMES period, int ma_period)  — 只 3 个参数
+   double atr = 0.0;
+   int h = iATR(_Symbol, InpSignalTF, InpSignalATRPeriod);
+   if(h != INVALID_HANDLE)
+     {
+      double buf[];
+      if(CopyBuffer(h, 0, 0, 1, buf) == 1) atr = buf[0];   // 当下 shift=0
+      if(atr <= 0 && CopyBuffer(h, 0, 1, 1, buf) == 1) atr = buf[0];  // 未完成则取 shift=1
+      IndicatorRelease(h);
+     }
    if(atr <= 0)
      {
       double p = SymbolInfoDouble(_Symbol, SYMBOL_BID);

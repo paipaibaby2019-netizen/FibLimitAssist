@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.41"
+#property version   "1.42"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -26,6 +26,7 @@
 #property description "· v1.39 移除 kernel32.dll 依赖, 改用纯路径判断 Wine (无需勾选 Allow DLL imports)"
 #property description "· v1.40 新增交易信号提醒: 强势上涨→弱势回调/强势下跌→弱势反弹 形态识别 + 5维评分 + Alert + 手机推送, 总开关默认关"
 #property description "· v1.41 修复 v1.40 编译错误: iATR() 返回 handle 需 CopyBuffer 取 ATR 值 (此前误作数值 4 参数调用导致 wrong parameters count)"
+#property description "· v1.42 修复 HIDE 后线条不停闪现: RefreshAll 隐藏态早退, 跳过写回可见位置的定位函数"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -1010,6 +1011,17 @@ void ApplyHidden()
 
 void RefreshAll()
   {
+   // v1.42: 隐藏态早退 — 隐藏时跳过所有"写回可见位置"的定位函数, 避免"显示→隐藏"往返造成线条闪现
+   //   (v1.07 注释声称 UpdateLabel 会在 g_hidden 时跳过, 但实际从未实现该判断, 导致每次 RefreshAll
+   //    先把隐藏的 HLINE/按钮写回正常位置, 再由 ApplyHidden 移走, MQL5 即时生效 → 肉眼闪烁)
+   if(g_hidden)
+     {
+      UpdateHideButton();   // 保持 SHOW 文字 + sticky 状态
+      ApplyHidden();        // 确保所有对象处于隐藏 (幂等)
+      ChartRedraw(0);
+      return;
+     }
+
    UpdateButtonX();
 
    UpdateLabel(HName(RATIO_100), g_p1);

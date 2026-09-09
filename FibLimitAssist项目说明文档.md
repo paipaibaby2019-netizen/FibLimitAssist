@@ -265,6 +265,7 @@ Range = |price_1.00 − price_0.00|
 | `InpUIScale` | 0.0 | [UI] **按钮尺寸**缩放系数（v1.27；v1.28 拆分为尺寸/字号两个；v1.29 修复 Wine 误判）：`0`=按平台智能默认（Wine/mac=1.0，原生 Windows=0.6）；正数=手动覆盖（按钮过大时调小，如 0.5~0.7） |
 | `InpFontScale` | 0.0 | [UI] **字号**缩放系数（v1.28 新增，与 `InpUIScale` 解耦）：`0`=按平台智能默认（始终 1.0，字保持清晰）；正数=手动覆盖（如 0.8=字略小） |
 | `InpDefaultSpanBars` | 60 | [默认区间]（v1.38）用最近多少根**已收盘** K 线的 High/Low 作为默认斐波那契区间基准（数据驱动，解决切周期 `ChartGetDouble(CHART_PRICE_MAX/MIN)` 返回 0/过窄导致线条挤死/跑出屏）；`0`=恢复旧"图表窗口视图"基准（不推荐） |
+| `InpWaveLineEnabled` | true | [波段画线] **总开关**（v1.44 新增，默认开）：`true`=只要检测周期内找到一对有效分型且波段幅度达标就画线；`false`=不画线，并清除已有线。**与 `InpSignalEnabled` 完全独立**——可单独控制画线与提醒。 |
 | `InpSignalEnabled` | false | [信号] **总开关**（v1.40，默认关）：`false`=信号提醒模块完全不运行（零开销）；`true`=开启形态识别与提醒 |
 | `InpSignalDirection` | `SIG_DIR_BOTH` | [信号] 检测方向：`BOTH`=双向 / `LONG`=仅做多 / `SHORT`=仅做空 |
 | `InpSignalTF` | `PERIOD_M5` | [信号] 检测周期（**独立于图表周期**，默认 M5）：EA 挂任何图表都按此固定周期检测形态 |
@@ -336,17 +337,43 @@ Range = |price_1.00 − price_0.00|
 
 `SendNotification()` 要生效，须在 MT5 里配置：`工具 → 选项 → 通知` → 勾选 **「启用推送通知」** → 填入 **MetaQuotes ID**（手机 MT5 App `设置 → 消息` 里查看），并勾选 **「允许来自本地程序端的通知」**。未配置时仅 PC 弹窗有效，推送静默失败，不影响 EA 运行。
 
-### 11.6 波段高低点画线（v1.43 新增）
+### 11.6 波段高低点画线（v1.43 新增，v1.44 与信号触发解耦）
 
-检测到信号后，在图表上把该波段的**低点与高点**用一条**趋势线（OBJ_TREND）**连接起来，直观标出波段区间：
+把「最近一个有效波段」的高低点用一条**趋势线（OBJ_TREND）**连接起来，直观标出当前波段区间。
+
+#### 核心设计：画线与信号触发完全解耦
+
+| 关注点 | 画线（v1.44 起） | 信号提醒（v1.40 起） |
+|--------|------------------|----------------------|
+| 触发条件 | **只要波段定义成立就画** | 形态 + 触达 50% + 未跌破起点 + 评分 ≥ 阈值 |
+| 总开关 | `InpWaveLineEnabled`（默认开） | `InpSignalEnabled`（默认关） |
+| 用户动作 | 仅画线，无任何提醒 | Alert 弹窗 + 手机推送 |
+| 执行时机 | 每个 tick 由 OnTick 调用 | 每个 tick 由 OnTick 调用 |
+| 何时更新 | **波段特征变化**（起止分型 shift/方向/时间 5 量任一改变）才重画 | 波段去重 ID 变化时才再提醒 |
+
+> 设计意图：**波段画线**是「图表辅助」功能，给交易者直观看到当前波段；**信号提醒**是「交易决策辅助」功能，提示交易机会。两者独立运行、各自可控。
+
+#### 波段定义成立的条件（画线逻辑）
+
+`FindLatestWave()` 每 tick 扫描检测周期（`InpSignalTF`）：
+
+1. **找最近一个分型**（顶或底，shift ≥ 2 已收盘确认）作为波段**终点**
+2. **往后找最近的相反分型**作为波段**起点**
+3. 终点是顶 → 做多波段（底→顶，DIR_UP 绿线）；终点是底 → 做空波段（顶→底，DIR_DOWN 红线）
+4. **防噪声门槛**：波段幅度 ≥ `InpBullMinATR × ATR`（与信号模块共用同一 ATR 倍数，跨周期自适应）
+
+不要求：根数限制（默认 3~20 是信号提醒的，画线不限）、价格触达、评分。
+
+#### 画线属性
 
 | 项 | 规则 |
 |----|------|
-| 颜色 | 上涨（做多信号）→ **绿色**（`CLR_BUY_BG`）；下跌（做空信号）→ **红色**（`CLR_SELL_BG`） |
-| 数量 | **只保留最新一个波段**——每命中新波段即删旧线、画新线 |
-| 画线对象 | `OBJ_TREND`（趋势线），线宽 2，非射线、不可选中、置于背景之上 |
+| 颜色 | 上涨 → **绿色**（`CLR_BUY_BG`）；下跌 → **红色**（`CLR_SELL_BG`） |
+| 数量 | **只保留最新一个波段**——波段特征变化时先删旧线再画新线 |
+| 画线对象 | `OBJ_TREND`（趋势线），线宽 2，非射线、不可选中 |
 | HIDE | **不受 HIDE 按钮影响**——波段线用独立前缀 `FLAW_`（不以 `g_prefix` 开头），`ApplyHidden()` 遍历时天然跳过 |
-| 清理 | `OnDeinit` 单独 `ObjectDelete(WaveName())`，切周期/移除不残留旧线 |
+| 清理 | `OnDeinit` 单独 `ObjectDelete(WaveName())`，切周期/移除不残留旧线；`InpWaveLineEnabled=false` 时也会立即清掉旧线 |
+| 稳定判断 | 用 `(iStart, iEnd, dir, tStart, tEnd)` 五量去重——同一波段不重复画，避免每 tick 闪烁 |
 
 #### 图表周期 ≠ 检测周期怎么办（关键）
 
@@ -356,10 +383,10 @@ Range = |price_1.00 − price_0.00|
 - `iTime()` 返回的是**绝对时间戳**，`iHigh()/iLow()` 返回的是**绝对价格**——同一品种同一时刻只有一个价格，与你在哪个周期看图无关。
 - 画线时把这两个 `(时间, 价格)` 坐标直接填进 `OBJ_TREND` 的锚点，MT5 会在**任意图表周期**上把它们精确落到对应的位置。
 
-因此：EA 挂在 M1 / M5 / H1 / H4 / D1 任意图表，只要 `InpSignalTF` 固定为 M5，画出来的波段线永远精确对齐那个 M5 波段的高低点，不会错位。实现上还做了两处细节优化：
+因此：EA 挂在 M1 / M5 / H1 / H4 / D1 任意图表，只要 `InpSignalTF` 固定为 M5，画出来的波段线永远精确对齐那个 M5 波段的高低点，不会错位。实现细节优化：
 
-1. **锚点居中**：锚点时间取「分型 bar 开盘时间 + 半个检测周期」（`PeriodSeconds(InpSignalTF)/2`），让线端点落在分型 K 线**中央**，视觉更贴合真实极值点。
-2. **覆盖旧线**：`DrawWaveLine()` 先 `ObjectDelete` 旧线再 `ObjectCreate`（同名对象已存在时 `ObjectCreate` 会返回 false，不先删会导致新波段无法覆盖旧线）。
+1. **锚点居中**：锚点时间取「分型 bar 开盘时间 + 半个检测周期」（`PeriodSeconds(InpSignalTF)/2`），让线端点落在分型 K 线**中央**。
+2. **覆盖旧线**：`DrawWaveLine()` 先 `ObjectDelete` 旧线再 `ObjectCreate`（同名对象存在时 `ObjectCreate` 会返回 false，不先删会导致新波段无法覆盖旧线）。
 
 ---
 
@@ -421,5 +448,6 @@ Range = |price_1.00 − price_0.00|
 | 1.41 | 2026-09-09 | **修复 v1.40 编译错误**：`SignalATR()` 里 `iATR()` 调用方式错误——MQL5 的 `iATR()` 签名是 `int iATR(string symbol, ENUM_TIMEFRAMES period, int ma_period)`，只接收 **3 个参数**、返回 **indicator handle(int)**，而非 ATR 数值。此前写成 4 参数 `iATR(_Symbol, InpSignalTF, InpSignalATRPeriod, 0)` 且当 double 用，导致 metaeditor 报 `wrong parameters count` 编译失败。改为：`iATR()` 拿 handle → `CopyBuffer(handle,0,0,1,buf)` 取 ATR 值 → `IndicatorRelease()` 释放；shift=0 未完成则取 shift=1，再兜底当前价 0.5%。**另精简 10 条过长的 `#property description`（`description is too long` 警告，不影响编译但清理干净）**。 |
 | 1.42 | 2026-09-09 | **修复 HIDE 后线条不停闪现**：根因是 `RefreshAll()` 执行顺序——它先调用 `UpdateLabel`/`UpdateButton` 等把对象**写回可见位置**，最后才 `ApplyHidden()` 移走；而 `UpdateLabel` 的注释声称「`g_hidden` 时跳过」，但该判断**从未实际实现**，导致每次 `RefreshAll`（新 bar、缩放平移、余额变化触发）都经历一次「显示→隐藏」往返，MQL5 的 `ObjectSetDouble` 改价即时生效 → 肉眼闪烁。修复：`RefreshAll()` 开头加**隐藏态早退**——`g_hidden=true` 时只刷新 HIDE 按钮文字 + 重新 `ApplyHidden()` + `ChartRedraw()`，跳过所有定位函数。 |
 | 1.43 | 2026-09-09 | **信号波段画线标记**（见 11.6）：把检测到的最新波段高低点用**趋势线（OBJ_TREND）**连接起来——上涨（做多）绿色、下跌（做空）红色，只保留最新一个波段。两个关键设计：① **不受 HIDE 影响**——波段线用独立对象前缀 `FLAW_`（不以 `g_prefix` 开头），`ApplyHidden()` 遍历时天然跳过，`OnDeinit` 单独清理；② **与图表周期无关**——锚点用「分型 bar 中央的**绝对时间** + **价格**」，即使 `InpSignalTF`（检测周期）≠ 图表周期，线也精确落在真实高低点上。 |
+| 1.44 | 2026-09-09 | **波段画线与信号触发完全解耦**（见 11.6）：v1.43 把画线绑在"信号命中"那一刻才画——用户反馈这与需求不符（波段定义成立就应画线，3/4/5 只是提醒条件）。重构：① 新增独立开关 `InpWaveLineEnabled=true`（默认开，与 `InpSignalEnabled` 完全独立）；② 新增 `FindLatestWave()` 函数只判断"波段定义"——找最近一对分型（顶+底，shift≥2 已收盘确认）+ 幅度 ≥ `InpBullMinATR×ATR`，**不**依赖触达/失效/评分；③ 新增 `UpdateWaveLine()` 主入口，每 tick 由 `OnTick` 调用（紧跟 `CheckSignals` 之后），用 `(iStart, iEnd, dir, tStart, tEnd)` 五量去重——同一波段不重画避免闪烁；④ `CheckSignals` 移除 `DrawWaveLine()` 调用，画线统一由 `UpdateWaveLine()` 负责；⑤ `DetectBullSignal`/`DetectBearSignal` 移除波段坐标赋值（统一由 `UpdateWaveLine` 设置）。设计意图：**波段画线是「图表辅助」**（直观标当前波段），**信号提醒是「交易决策辅助」**（提示机会），两者独立运行、各自可控。 |
 
-> **版本缺口已回补**：v1.10~v1.43 已全部同步至本文档。其中 v1.10/v1.11/v1.12/v1.14 在 git 中无独立提交（本地迭代后随 v1.13 一次性推送，或被后续版本号跳号），内容以代码注释标注为准。
+> **版本缺口已回补**：v1.10~v1.44 已全部同步至本文档。其中 v1.10/v1.11/v1.12/v1.14 在 git 中无独立提交（本地迭代后随 v1.13 一次性推送，或被后续版本号跳号），内容以代码注释标注为准。

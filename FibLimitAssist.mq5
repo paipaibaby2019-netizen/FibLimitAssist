@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.42"
+#property version   "1.43"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -27,6 +27,7 @@
 #property description "· v1.40 新增交易信号提醒: 强势上涨→弱势回调/强势下跌→弱势反弹 形态识别 + 5维评分 + Alert + 手机推送, 总开关默认关"
 #property description "· v1.41 修复 v1.40 编译错误: iATR() 返回 handle 需 CopyBuffer 取 ATR 值 (此前误作数值 4 参数调用导致 wrong parameters count)"
 #property description "· v1.42 修复 HIDE 后线条不停闪现: RefreshAll 隐藏态早退, 跳过写回可见位置的定位函数"
+#property description "· v1.43 信号波段画线: 检测到的最新波段高低点用趋势线连接 (上涨绿/下跌红), 独立前缀不受 HIDE 影响; 锚点用绝对时间+价格, 与图表周期无关"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -174,6 +175,13 @@ long     g_lastStepTimeMs   = 0;
 //   做多/做空各维护一个已提醒 ID, 同一波段只提醒一次, 新波段(新时间戳)立即提醒
 datetime g_sigLongID  = 0;   // 已提醒的做多波段 ID (底分型中间 bar 时间戳)
 datetime g_sigShortID = 0;   // 已提醒的做空波段 ID (顶分型中间 bar 时间戳)
+
+// v1.43 新增: 信号波段画线 — 记录最新波段的高低点坐标与方向
+//   画线用"绝对时间 + 价格"(与图表周期无关), 检测周期(InpSignalTF)可与图表周期不同
+//   独立对象前缀 (不以 g_prefix 开头), 故 ApplyHidden 遍历不会隐藏它, 不受 HIDE 按钮影响
+datetime g_waveT1 = 0, g_waveT2 = 0;  // 波段起点/终点时间 (分型 bar 中央)
+double   g_waveP1 = 0, g_waveP2 = 0;  // 波段起点/终点价格
+int      g_waveDir = DIR_FLAT;        // DIR_UP=上涨(绿线), DIR_DOWN=下跌(红线)
 
 //---------------------------- 工具函数 -----------------------------//
 // v1.39: 移除 kernel32.dll 依赖 — 改用纯路径判断 Wine (EA 不再需要勾选 Allow DLL imports)
@@ -370,6 +378,8 @@ string RatioBName()        { return g_prefix + "RATIO_B"; }
 string RatioCName()        { return g_prefix + "RATIO_C"; }
 // 隐藏/显示按钮对象名 (始终显示，不会随 g_hidden 隐藏)
 string HideName()          { return g_prefix + "HIDE"; }
+// v1.43: 信号波段线对象名 — 独立前缀 FLAW_ (不以 g_prefix 开头), 故 ApplyHidden/ObjectsDeleteAll(g_prefix) 都不会碰它
+string WaveName()          { return "FLAW_" + IntegerToString(ChartID()) + "_" + _Symbol + "_WAVE"; }
 // v1.13: 一键调整 1.00/0.00 到最近高低点的按钮对象名
 string AdjustName()        { return g_prefix + "ADJUST"; }
 
@@ -2355,6 +2365,13 @@ bool DetectBullSignal(datetime &waveID, double &score, string &detail)
       // 命中
       waveID = iTime(_Symbol, InpSignalTF, iBot);
       score  = sc;
+      // v1.43: 记录波段坐标用于画线 (低点→高点, 上涨绿线); 锚点用分型 bar 中央的绝对时间+价格
+      int tfSec = PeriodSeconds(InpSignalTF);
+      g_waveT1 = iTime(_Symbol, InpSignalTF, iBot) + tfSec / 2;
+      g_waveP1 = botPrice;
+      g_waveT2 = iTime(_Symbol, InpSignalTF, iTop) + tfSec / 2;
+      g_waveP2 = topPrice;
+      g_waveDir = DIR_UP;
       detail = StringFormat("涨幅 %.1f点/%d根 | 回调 %.1f点/%d根",
                             rise / _Point, nbars,
                             rise * InpPullbackDepth / _Point, pullbackBars);
@@ -2415,12 +2432,41 @@ bool DetectBearSignal(datetime &waveID, double &score, string &detail)
 
       waveID = iTime(_Symbol, InpSignalTF, iTop);
       score  = sc;
+      // v1.43: 记录波段坐标用于画线 (高点→低点, 下跌红线); 锚点用分型 bar 中央的绝对时间+价格
+      int tfSec = PeriodSeconds(InpSignalTF);
+      g_waveT1 = iTime(_Symbol, InpSignalTF, iTop) + tfSec / 2;
+      g_waveP1 = topPrice;
+      g_waveT2 = iTime(_Symbol, InpSignalTF, iBot) + tfSec / 2;
+      g_waveP2 = botPrice;
+      g_waveDir = DIR_DOWN;
       detail = StringFormat("跌幅 %.1f点/%d根 | 反弹 %.1f点/%d根",
                             fall / _Point, nbars,
                             fall * InpPullbackDepth / _Point, pullbackBars);
       return true;
      }
    return false;
+  }
+
+// v1.43: 把最新波段高低点画成趋势线 (上涨绿 / 下跌红)
+//   锚点 = 分型 bar 中央的绝对时间 + 价格, 因此与图表周期无关:
+//   即使 InpSignalTF(检测周期) ≠ 图表周期, 线也会精确落在真实高低点位置上
+//   独立前缀 FLAW_ 不被 ApplyHidden 隐藏, 不受 HIDE 按钮影响
+void DrawWaveLine()
+  {
+   string name = WaveName();
+   ObjectDelete(0, name);   // 先删旧线: 同名对象存在时 ObjectCreate 会失败, 无法覆盖上一波段的线
+
+   if(g_waveT1 == 0 || g_waveT2 == 0 || g_waveP1 <= 0 || g_waveP2 <= 0)
+      return;
+
+   if(!ObjectCreate(0, name, OBJ_TREND, 0, g_waveT1, g_waveP1, g_waveT2, g_waveP2))
+      return;
+   ObjectSetInteger(0, name, OBJPROP_COLOR,      (g_waveDir == DIR_UP) ? CLR_BUY_BG : CLR_SELL_BG);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH,      2);
+   ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT,  false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_BACK,       false);
+   ChartRedraw(0);
   }
 
 // 信号提醒主入口: OnTick 里调用; 总开关关闭直接返回
@@ -2440,6 +2486,7 @@ void CheckSignals()
       if(waveID != 0 && waveID != g_sigLongID)   // 波段去重
         {
          g_sigLongID = waveID;
+         DrawWaveLine();   // v1.43: 标记最新波段高低点 (上涨绿线, 不受 HIDE 影响)
          string msg = StringFormat("[FibLimitAssist] 强势看涨信号 (%s %s) 评分 %.0f/100 | %s",
                                    _Symbol, SignalTFStr(), score, detail);
          Alert(msg);
@@ -2453,6 +2500,7 @@ void CheckSignals()
       if(waveID != 0 && waveID != g_sigShortID)
         {
          g_sigShortID = waveID;
+         DrawWaveLine();   // v1.43: 标记最新波段高低点 (下跌红线, 不受 HIDE 影响)
          string msg = StringFormat("[FibLimitAssist] 强势看跌信号 (%s %s) 评分 %.0f/100 | %s",
                                    _Symbol, SignalTFStr(), score, detail);
          Alert(msg);
@@ -2541,6 +2589,7 @@ void OnDeinit(const int reason)
    SaveFibPositions();
    // 仅清除本实例图表对象；服务器挂单保留不动
    ObjectsDeleteAll(0, g_prefix, -1, -1);
+   ObjectDelete(0, WaveName());   // v1.43: 波段线独立前缀, 需单独清理 (否则切周期残留旧线)
    ChartRedraw(0);
   }
 

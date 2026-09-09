@@ -336,6 +336,31 @@ Range = |price_1.00 − price_0.00|
 
 `SendNotification()` 要生效，须在 MT5 里配置：`工具 → 选项 → 通知` → 勾选 **「启用推送通知」** → 填入 **MetaQuotes ID**（手机 MT5 App `设置 → 消息` 里查看），并勾选 **「允许来自本地程序端的通知」**。未配置时仅 PC 弹窗有效，推送静默失败，不影响 EA 运行。
 
+### 11.6 波段高低点画线（v1.43 新增）
+
+检测到信号后，在图表上把该波段的**低点与高点**用一条**趋势线（OBJ_TREND）**连接起来，直观标出波段区间：
+
+| 项 | 规则 |
+|----|------|
+| 颜色 | 上涨（做多信号）→ **绿色**（`CLR_BUY_BG`）；下跌（做空信号）→ **红色**（`CLR_SELL_BG`） |
+| 数量 | **只保留最新一个波段**——每命中新波段即删旧线、画新线 |
+| 画线对象 | `OBJ_TREND`（趋势线），线宽 2，非射线、不可选中、置于背景之上 |
+| HIDE | **不受 HIDE 按钮影响**——波段线用独立前缀 `FLAW_`（不以 `g_prefix` 开头），`ApplyHidden()` 遍历时天然跳过 |
+| 清理 | `OnDeinit` 单独 `ObjectDelete(WaveName())`，切周期/移除不残留旧线 |
+
+#### 图表周期 ≠ 检测周期怎么办（关键）
+
+**无需任何处理，天然兼容。** 原因是画线锚点用的是「**绝对时间 + 价格**」这两个**与周期无关**的量：
+
+- 波段检测在 `InpSignalTF`（如 M5）上进行，找到的高/低点本质是两个坐标：`(该 bar 开盘时间的绝对 datetime, 该 bar 的 High/Low 价格)`。
+- `iTime()` 返回的是**绝对时间戳**，`iHigh()/iLow()` 返回的是**绝对价格**——同一品种同一时刻只有一个价格，与你在哪个周期看图无关。
+- 画线时把这两个 `(时间, 价格)` 坐标直接填进 `OBJ_TREND` 的锚点，MT5 会在**任意图表周期**上把它们精确落到对应的位置。
+
+因此：EA 挂在 M1 / M5 / H1 / H4 / D1 任意图表，只要 `InpSignalTF` 固定为 M5，画出来的波段线永远精确对齐那个 M5 波段的高低点，不会错位。实现上还做了两处细节优化：
+
+1. **锚点居中**：锚点时间取「分型 bar 开盘时间 + 半个检测周期」（`PeriodSeconds(InpSignalTF)/2`），让线端点落在分型 K 线**中央**，视觉更贴合真实极值点。
+2. **覆盖旧线**：`DrawWaveLine()` 先 `ObjectDelete` 旧线再 `ObjectCreate`（同名对象已存在时 `ObjectCreate` 会返回 false，不先删会导致新波段无法覆盖旧线）。
+
 ---
 
 ## 12. 编译与使用
@@ -395,5 +420,6 @@ Range = |price_1.00 − price_0.00|
 | 1.40 | 2026-09-09 | **新增交易信号提醒模块**（见第 11 章）：识别「强势上涨→弱势回调」（做多）/「强势下跌→弱势反弹」（做空）形态 + 5 维评分 + `Alert()` PC 弹窗 + `SendNotification()` 手机推送。核心要点：① 独立只读模块，总开关 `InpSignalEnabled` 默认关，关闭时零开销；② 缠论 3 根分型（底/顶）识别，不复用 ADJUST 的 Williams Fractals（语义不同）；③ 只用已收盘 bar 识别结构，触达/失效用实时价（做多 BID / 做空 ASK）；④ 防噪声用 **ATR 倍数**（`InpBullMinATR`，跨周期自适应，替代旧「占价格 %」方案）；⑤ 防重用**按波段去重**（分型 bar 时间戳作 ID，替代时间冷却，避免误杀相邻新波段）；⑥ 检测周期 `InpSignalTF` 独立于图表周期。新增 13 个 `[信号]` 前缀输入参数。 |
 | 1.41 | 2026-09-09 | **修复 v1.40 编译错误**：`SignalATR()` 里 `iATR()` 调用方式错误——MQL5 的 `iATR()` 签名是 `int iATR(string symbol, ENUM_TIMEFRAMES period, int ma_period)`，只接收 **3 个参数**、返回 **indicator handle(int)**，而非 ATR 数值。此前写成 4 参数 `iATR(_Symbol, InpSignalTF, InpSignalATRPeriod, 0)` 且当 double 用，导致 metaeditor 报 `wrong parameters count` 编译失败。改为：`iATR()` 拿 handle → `CopyBuffer(handle,0,0,1,buf)` 取 ATR 值 → `IndicatorRelease()` 释放；shift=0 未完成则取 shift=1，再兜底当前价 0.5%。**另精简 10 条过长的 `#property description`（`description is too long` 警告，不影响编译但清理干净）**。 |
 | 1.42 | 2026-09-09 | **修复 HIDE 后线条不停闪现**：根因是 `RefreshAll()` 执行顺序——它先调用 `UpdateLabel`/`UpdateButton` 等把对象**写回可见位置**，最后才 `ApplyHidden()` 移走；而 `UpdateLabel` 的注释声称「`g_hidden` 时跳过」，但该判断**从未实际实现**，导致每次 `RefreshAll`（新 bar、缩放平移、余额变化触发）都经历一次「显示→隐藏」往返，MQL5 的 `ObjectSetDouble` 改价即时生效 → 肉眼闪烁。修复：`RefreshAll()` 开头加**隐藏态早退**——`g_hidden=true` 时只刷新 HIDE 按钮文字 + 重新 `ApplyHidden()` + `ChartRedraw()`，跳过所有定位函数。 |
+| 1.43 | 2026-09-09 | **信号波段画线标记**（见 11.6）：把检测到的最新波段高低点用**趋势线（OBJ_TREND）**连接起来——上涨（做多）绿色、下跌（做空）红色，只保留最新一个波段。两个关键设计：① **不受 HIDE 影响**——波段线用独立对象前缀 `FLAW_`（不以 `g_prefix` 开头），`ApplyHidden()` 遍历时天然跳过，`OnDeinit` 单独清理；② **与图表周期无关**——锚点用「分型 bar 中央的**绝对时间** + **价格**」，即使 `InpSignalTF`（检测周期）≠ 图表周期，线也精确落在真实高低点上。 |
 
-> **版本缺口已回补**：v1.10~v1.42 已全部同步至本文档。其中 v1.10/v1.11/v1.12/v1.14 在 git 中无独立提交（本地迭代后随 v1.13 一次性推送，或被后续版本号跳号），内容以代码注释标注为准。
+> **版本缺口已回补**：v1.10~v1.43 已全部同步至本文档。其中 v1.10/v1.11/v1.12/v1.14 在 git 中无独立提交（本地迭代后随 v1.13 一次性推送，或被后续版本号跳号），内容以代码注释标注为准。

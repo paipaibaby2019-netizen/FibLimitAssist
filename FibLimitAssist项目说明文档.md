@@ -90,17 +90,17 @@ price_r = price_1.00 + (1 - r) × (price_0.00 - price_1.00)
 | 按钮 | 文字 | 位置 | 作用 |
 |------|------|------|------|
 | 取消挂单 | `CANCEL` | 最上面那根线的**下方 4px**，**ADJUST 右侧 4px**（v1.61 改为左对齐链第三环，原右对齐 `g_btnX` 废弃） | 一键取消**当前图表品种**的全部挂单（不限魔术号，含手动挂的 LIMIT/STOP/STOP_LIMIT；不含其他品种的挂单） |
-| 一键保本（v1.08 新增） | `EVEN` | **v1.62 镜像布局**：最下面那根线的下方 4px（与 STOP 同侧），`x = stepBox + 8`（与顶部 SWAP 左右对齐） | 遍历**当前图表品种**的全部持仓：**盈利仓位的 SL 改到入场价**（锁住利润，标准 breakeven）；**亏损仓位的 TP 改到入场价**（价格回到入场即保本离场）。已是入场价的自动跳过。 |
-| 平一半 | `CHALF`（v1.08 由 CLOSE HALF 改名） | **v1.62 镜像布局**：最下面那根线的下方 4px（与 STOP 同侧），`x = stepBox + 92`（与顶部 ADJUST 左右对齐） | 按手数砍半平掉**当前图表品种**的全部持仓；砍半后 < 品种最小手数则**全平该仓位** |
-| 清仓 | `CALL`（v1.08 由 CLOSE ALL 改名） | **v1.62 镜像布局**：最下面那根线的下方 4px（与 STOP 同侧），`x = stepBox + 176`（与顶部 CANCEL 左右对齐） | 一键平掉**当前图表品种**的全部持仓，**不涉及挂单** |
+| 一键保本（v1.08 新增） | `EVEN` | **v1.63 镜像布局**：最下面那根线的上方 26px（与 MARKET 同行 `yBtn`），`x = stepBox + 8`（与顶部 SWAP 左右对齐） | 遍历**当前图表品种**的全部持仓：**盈利仓位的 SL 改到入场价**（锁住利润，标准 breakeven）；**亏损仓位的 TP 改到入场价**（价格回到入场即保本离场）。已是入场价的自动跳过。 |
+| 平一半 | `CHALF`（v1.08 由 CLOSE HALF 改名） | **v1.63 镜像布局**：最下面那根线的上方 26px（与 MARKET 同行 `yBtn`），`x = stepBox + 92`（与顶部 ADJUST 左右对齐） | 按手数砍半平掉**当前图表品种**的全部持仓；砍半后 < 品种最小手数则**全平该仓位** |
+| 清仓 | `CALL`（v1.08 由 CLOSE ALL 改名） | **v1.63 镜像布局**：最下面那根线的上方 26px（与 MARKET 同行 `yBtn`），`x = stepBox + 176`（与顶部 CANCEL 左右对齐） | 一键平掉**当前图表品种**的全部持仓，**不涉及挂单** |
 
 ### 3.5 功能控制按钮（最下面那根线上方）
 
 | 按钮 | 文字 | 位置 | 作用 |
 |------|------|------|------|
-| 隐藏/显示 | `HIDE` / `SHOW` | 图表左侧 **STEP 按钮列右侧**（v1.22 右移，避免 long 模式与 0.00 STEP 按钮重叠） | 切换显示 EA 全部斐波那契线条与挂单/仓位按钮（**HIDE 按钮自身始终显示**；**v1.59 起 FVG 按钮 / FVG 矩形 / FVG 标签独立于 HIDE**，由 FVG 按钮单独控制；波段线 `FLAW_` 也不受 HIDE 影响）。状态会话内有效，MT5 重启/EA 重附后恢复显示。底色浅灰（与 CANCEL 同色，v1.25）；HIDE 态保留橙黄警示。 |
-| 风险档位 | `0.5%` / `1%` / `2%` | `HIDE` 右侧（左侧第 2 个，v1.22） | 循环切换单笔风险档位：`0.5% → 1% → 2% → 0.5%`。当前档位影响**所有下单动作**（0.79/0.49 挂单、市价单）。会话内持久化。 |
-| FVG 切换（v1.45 新增） | `FVG` / `OFF` | `RISK` 右侧 4px（底部最右一列），宽 80 | 切换 FVG 矩形显示（公允价值缺口）：`OFF`=隐藏（按钮文字 OFF、底色橙黄、按下 sticky），`FVG`=显示（上涨浅绿 / 下跌浅红 / 完全填补浅灰；v1.58 起不再区分未填补与部分填补）。**v1.59 起完全独立于 HIDE**——HIDE 主 fib UI 时 FVG 按钮和矩形仍可见，按钮由用户独立控制。 |
+| 隐藏/显示 | `HIDE` / `SHOW` | **v1.63 移到顶部 CANCEL 右侧**（顶部 6 按钮链第 4 个：`LONG → ADJUST → CANCEL → HIDE → RISK → FVG`），垂直与顶部按钮同 Y（最上面线下方 4px）。原位于"底部左侧 STEP 列右侧"已废弃，位置释放给 EVEN。 | 切换显示 EA 全部斐波那契线条与挂单/仓位按钮（**HIDE 按钮自身始终显示**；**v1.59 起 FVG 按钮 / FVG 矩形 / FVG 标签独立于 HIDE**，由 FVG 按钮单独控制；波段线 `FLAW_` 也不受 HIDE 影响）。状态会话内有效，MT5 重启/EA 重附后恢复显示。底色浅灰（与 CANCEL 同色，v1.25）；HIDE 态保留橙黄警示。 |
+| 风险档位 | `0.5%` / `1%` / `2%` | **v1.63 移到顶部 HIDE 右侧**（顶部 6 按钮链第 5 个），X = `stepBox + 8 + 80 + 4 + 100 + 4 + 80 + 4`，垂直同顶部 Y | 循环切换单笔风险档位：`0.5% → 1% → 2% → 0.5%`。当前档位影响**所有下单动作**（0.79/0.49 挂单、市价单）。会话内持久化。 |
+| FVG 切换（v1.45 新增） | `FVG` / `OFF` | **v1.63 移到顶部 RISK 右侧**（顶部 6 按钮链第 6 个，最右），X = `stepBox + 8 + 80 + 4 + 100 + 4 + 80 + 4 + 80 + 4`，垂直同顶部 Y。宽 80。原位于"底部 RISK 右侧 4px"已废弃。 | 切换 FVG 矩形显示（公允价值缺口）：`OFF`=隐藏（按钮文字 OFF、底色橙黄、按下 sticky），`FVG`=显示（上涨浅绿 / 下跌浅红 / 完全填补浅灰；v1.58 起不再区分未填补与部分填补）。**v1.59 起完全独立于 HIDE**——HIDE 主 fib UI 时 FVG 按钮和矩形仍可见，按钮由用户独立控制。 |
 | 实时浮盈（v1.08 新增） | `(-1012)` / `(+2564)` 等 | `MARKET` 按钮**左侧**，右对齐文字 | 账户全部持仓的**当前浮动盈亏**合计（含 swap）。盈利 `(+数字)` 绿色，亏损 `(-数字)` 红色，接近 0 显示灰色 `(0)`。每 tick 更新。 |
 | 市价下单 | `BUY MKT` / `SELL MKT` / `--` | 水平居中（线的中点），**最下面线上方 4px**（v1.32 固定） | 方向为 `LONG` 时显示 `BUY MKT`（绿），`SHORT` 时显示 `SELL MKT`（红），`FLAT` 时显示 `--`（灰）。止损 = `1.00 价 ± Range×1%`，盈亏比 1:1。 |
 | 当日盈亏（v1.08 新增） | `(+2564)` / `(-580)` 等 | `MARKET` 按钮**右侧**，左对齐文字 | 自**切日时区** 00:00 起所有 deals（已平仓 + 当前未平仓浮盈）盈亏合计。切日基准由 `InpDayResetTimezone` 决定（v1.12：默认 `CET_AUTO` = FTMO 布拉格时间，自动判断欧洲夏令时；也可 LOCAL/强制 CET/CEST）。盈利绿、亏损红、接近 0 灰。每 tick 更新。 |
@@ -465,5 +465,7 @@ Range = |price_1.00 − price_0.00|
 | 1.60 fix | 2026-09-12 | **rectEndTime 作用域 + description 精简**：① v1.60 `rectEndTime` 编译错误修复——原在 `if(show)` 块内声明，但下方 `if(showLbl)` 块也用到，作用域不重叠。提升到 `for` 循环顶部声明；② `#property description too long` × 9 警告修复——MT5 内部对 description 总字符数有限制（约 1024 字节），17 条 description 累计 1551 字符导致从某行起报"too long"。精简到 7 条，累计 405 字符，v1.50-v1.59 的变更记录合并为"详见项目说明文档第 13 章"单行。 |
 | 1.61 | 2026-09-12 | **顶部按钮布局重构 — 左对齐链**：原 LONG (SWAP) 居中 `(w-80)/2`，ADJUST 跟随 LONG 右侧 4px，CANCEL 右对齐 `g_btnX = w-108`——顶部右侧留白过大、与底部 HIDE/RISK/FVG 左列无视觉对齐。重构后顶部三个按钮全部左对齐形成"LONG → ADJUST → CANCEL"链，与底部"HIDE → RISK → FVG"链视觉对齐。改动：① `UpdateSwapButton` X = `stepBox + 8`（STEP 列右 8px，类 HIDE 位置）；② `UpdateAdjustButton` X = `stepBox + 92`（LONG 右侧 4px，类 RISK 跟随 HIDE 模式）；③ `UpdateTopButtons` 中 CANCEL X = `stepBox + 176`（ADJUST 右侧 4px，类 FVG 跟随 RISK 模式），原 `g_btnX` 用法废弃。三个函数各自计算 `stepBox`（少量重复，换 RefreshAll 调用顺序无关性）。**STEP 几何宏 `#define STEP_BTN_*` 上移**——`UpdateSwapButton`/`UpdateAdjustButton` 重构后前置引用 STEP 宏，但 MQL5 按文件顺序解析 `#define`（不像 C 预处理器全单元展开），原位置（`CreateStepButton` 之前）在两个函数之后导致 `undeclared identifier` × 8 编译错误。宏定义上移到 `UpdateSwapButton` 之前（line 600-604），原位置保留一行注释指引。 |
 | 1.62 | 2026-09-12 | **EVEN/CHALF/CALL 镜像到底部下方**：原布局：最下面线上方右侧（`yBtn`），X 右对齐到 `g_btnX`，三按钮等距 4px 排开。新布局：最下面线下方 4px（与 STOP 同侧 `y + UI(4)`），X 分别对齐顶部 SWAP/ADJUST/CANCEL（`stepBox + 8/92/176`），形成"顶部按钮链 + 镜像仓位按钮 + STOP 居中"三层对称布局——顶部"配置 / 取消"，底部镜像"仓位管理 / 突破"。复用 `UpdateBottomButtons` 顶部已声明的 `stepBox`，无需重复计算。原 `g_btnX` 用法完全废弃。 |
+| 1.62 revert | 2026-09-12 | **v1.62 位置错误 — 由 v1.63 修正**：v1.62 把 EVEN/CHALF/CALL 放到 `y + UI(4)`（最下面线下方），实际显示在 K 线下方，与用户意图"放在 SHORT/ADJUST/CANCEL 正下方"不符——"正下方"应为 yBtn（最下面线上方 26px）。用户截图也显示三个红框在 K 线上方（最下面线上方）。**v1.63 修正**：EVEN/CHALF/CALL 改回 yBtn，X 仍与顶部按钮对齐；底部左侧位置释放给 EVEN/CHALF/CALL，原 HIDE/RISK/FVG 同步移到顶部 CANCEL 右侧形成 6 按钮一长链。 |
+| 1.63 | 2026-09-12 | **完整对称布局 + HIDE/RISK/FVG 上移顶部**：① EVEN/CHALF/CALL 改回 yBtn（最下面线上方 26px，与 MARKET 同行），X = `stepBox + 8/92/176` 与顶部 SWAP/ADJUST/CANCEL 左右对齐——形成"顶部 6 按钮链 + 底部镜像 3 仓位按钮 + 中间 MARKET/STOP"三层对称；② HIDE/RISK/FVG 从底部左侧移到顶部 CANCEL 右侧（X = `xCancel + 100 + 4` / +84 / +84），形成顶部一长链 `LONG → ADJUST → CANCEL → HIDE → RISK → FVG`，释放底部左侧位置；③ `UpdateTopButtons` 增加 HIDE/RISK/FVG 三个 `ObjectSetInteger` 设置；④ `UpdateBottomButtons` 中原 HIDE/RISK/FVG 位置代码删除。 |
 
 > **版本缺口已回补**：v1.10~v1.44 已全部同步至本文档。其中 v1.10/v1.11/v1.12/v1.14 在 git 中无独立提交（本地迭代后随 v1.13 一次性推送，或被后续版本号跳号），内容以代码注释标注为准。

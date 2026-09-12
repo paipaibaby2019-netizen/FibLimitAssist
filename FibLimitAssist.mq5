@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.62"
-#property description "半自动斐波那契限价下单辅助 (v1.62)"
+#property version   "1.63"
+#property description "半自动斐波那契限价下单辅助 (v1.63)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -14,6 +14,7 @@
 #property description "v1.50-v1.59 修复详情见项目说明文档第 13 章 (描述符总数受限, 变更记录仅保留概要)"
 #property description "v1.61 顶部按钮左对齐链: LONG→ADJUST→CANCEL 类似底部 HIDE→RISK→FVG 链, stepBox+8/92/176 递进"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
+#property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -888,13 +889,33 @@ void UpdateTopButtons()
 
    // v1.61: CANCEL X = stepBox + 8 + 80 + 4 + 80 + 4 = stepBox + 176 (ADJUST 右侧相邻 4px)
    //   原右对齐 (g_btnX) 已废弃 — 顶部按钮全部左对齐
+   // v1.63: HIDE / RISK / FVG 移到 CANCEL 右侧 — 形成顶部 6 按钮一长链 (LONG→ADJUST→CANCEL→HIDE→RISK→FVG)
+   //   底部左侧位置释放给 EVEN/CHALF/CALL (镜像布局)
    int stepBox = UI(STEP_BTN_X) + (UI(STEP_BTN_W) + UI(STEP_BTN_GAP)) + UI(STEP_BTN_W);
    int xCancel = stepBox + UI(8) + UI(80) + UI(4) + UI(80) + UI(4);
+   int xHide   = xCancel + UI(100) + UI(4);                 // HIDE 紧邻 CANCEL 右侧
+   int xRisk   = xHide   + UI(80)  + UI(4);                 // RISK 紧邻 HIDE 右侧
+   int xFVG    = xRisk   + UI(80)  + UI(4);                 // FVG 紧邻 RISK 右侧
    string cancelName = CancelPendingName();
    if(ObjectFind(0, cancelName) >= 0)
      {
       ObjectSetInteger(0, cancelName, OBJPROP_XDISTANCE, xCancel);
       ObjectSetInteger(0, cancelName, OBJPROP_YDISTANCE, yBtn);
+     }
+   if(ObjectFind(0, HideName()) >= 0)
+     {
+      ObjectSetInteger(0, HideName(), OBJPROP_XDISTANCE, xHide);
+      ObjectSetInteger(0, HideName(), OBJPROP_YDISTANCE, yBtn);
+     }
+   if(ObjectFind(0, RiskName()) >= 0)
+     {
+      ObjectSetInteger(0, RiskName(), OBJPROP_XDISTANCE, xRisk);
+      ObjectSetInteger(0, RiskName(), OBJPROP_YDISTANCE, yBtn);
+     }
+   if(ObjectFind(0, FVGButtonName()) >= 0)
+     {
+      ObjectSetInteger(0, FVGButtonName(), OBJPROP_XDISTANCE, xFVG);
+      ObjectSetInteger(0, FVGButtonName(), OBJPROP_YDISTANCE, yBtn);
      }
   }
 
@@ -913,30 +934,10 @@ void UpdateBottomButtons()
    int marketW = UI(110);
    int marketX = (w - marketW) / 2;
 
-   // 左侧 HIDE / RISK
-   // v1.22: HIDE / RISK 右移到 STEP 按钮 (X=[6, 52]) 右侧, 避免 long 模式
-   //   0.00 在底部时与 0.00 STEP 按钮 Y 重叠
-   //   STEP 按钮范围 X=[STEP_BTN_X, STEP_BTN_X + STEP_BTN_DN_OFFSET + STEP_BTN_W]
-   // v1.27: 全部按 UI 缩放
-   int stepBox = UI(STEP_BTN_X) + (UI(STEP_BTN_W) + UI(STEP_BTN_GAP)) + UI(STEP_BTN_W); // 缩放后的 STEP 列右边缘
-   int xHide   = stepBox + UI(8);                                 // HIDE 左 X
-   int xRisk   = xHide + UI(80) + UI(4);                          // RISK 左 X
-   if(ObjectFind(0, HideName()) >= 0)
-     {
-      ObjectSetInteger(0, HideName(), OBJPROP_XDISTANCE, xHide);
-      ObjectSetInteger(0, HideName(), OBJPROP_YDISTANCE, yBtn);
-     }
-   if(ObjectFind(0, RiskName()) >= 0)
-     {
-      ObjectSetInteger(0, RiskName(), OBJPROP_XDISTANCE, xRisk);
-      ObjectSetInteger(0, RiskName(), OBJPROP_YDISTANCE, yBtn);
-     }
-   // v1.45: FVG 按钮 — RISK 右侧 4px, 与 RISK 同 80 宽
-   if(ObjectFind(0, FVGButtonName()) >= 0)
-     {
-      ObjectSetInteger(0, FVGButtonName(), OBJPROP_XDISTANCE, xRisk + UI(80) + UI(4));
-      ObjectSetInteger(0, FVGButtonName(), OBJPROP_YDISTANCE, yBtn);
-     }
+   // v1.63: HIDE / RISK / FVG 已从底部左侧移到顶部 CANCEL 右侧 — 见 UpdateTopButtons
+   //   原位置 (最下面线上方 yBtn 左侧) 释放给 EVEN/CHALF/CALL, 形成顶部配置链 + 底部仓位镜像对称布局
+   //   stepBox 在 UpdateBottomButtons 仍保留 — 供 EVEN/CHALF/CALL 计算 X (复用顶部按钮链公式)
+   int stepBox = UI(STEP_BTN_X) + (UI(STEP_BTN_W) + UI(STEP_BTN_GAP)) + UI(STEP_BTN_W);
 
    // 中间 MKT
    if(ObjectFind(0, MarketName()) >= 0)
@@ -961,27 +962,27 @@ void UpdateBottomButtons()
       ObjectSetInteger(0, PnLRightName(), OBJPROP_YDISTANCE, yBtn + UI(4));
      }
 
-   // v1.62: 右侧 EVEN / CHALF / CALL — 镜像到顶部按钮链 (X 与 SWAP/ADJUST/CANCEL 对齐, Y = y+UI(4) 与 STOP 同侧)
-   //   原布局: 最下面线上方右侧 (yBtn), X 右对齐到 g_btnX, 三按钮等距 4px 排开
-   //   新布局: 最下面线下方 4px (与 STOP 同侧), X 分别 = stepBox+8 / stepBox+92 / stepBox+176, 与顶部 LONG/ADJUST/CANCEL 完全左右对齐
+   // v1.63: 右侧 EVEN / CHALF / CALL — 紧贴顶部按钮正下方 (X 与 SWAP/ADJUST/CANCEL 对齐, Y = yBtn 与 HIDE/RISK/FVG 同行)
+   //   v1.62 错误: 改为 y+UI(4) (最下面线下方 4px, 镜像顶部按钮) — 实际显示在 K 线下方, 距离顶部按钮太远, 不符合 "正下方" 语义
+   //   v1.63 修正: Y 改回 yBtn (最下面线上方 26px, 与 HIDE/RISK/FVG/MARKET 同行), X 仍 = stepBox+8/92/176 与顶部按钮对齐
+   //   HIDE/RISK/FVG 同步从底部左侧移到顶部 CANCEL 右侧, 释放底部左侧给 EVEN/CHALF/CALL
    int xEven  = stepBox + UI(8);
    int xChalf = stepBox + UI(92);
    int xCall  = stepBox + UI(176);
-   int yMirror = y + UI(4);   // 与 STOP (BUY/SELL STP) 同 Y, 关于最下面线镜像
    if(ObjectFind(0, EvenName()) >= 0)
      {
       ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, xEven);
-      ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yMirror);
+      ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yBtn);
      }
    if(ObjectFind(0, CloseHalfName()) >= 0)
      {
       ObjectSetInteger(0, CloseHalfName(), OBJPROP_XDISTANCE, xChalf);
-      ObjectSetInteger(0, CloseHalfName(), OBJPROP_YDISTANCE, yMirror);
+      ObjectSetInteger(0, CloseHalfName(), OBJPROP_YDISTANCE, yBtn);
      }
    if(ObjectFind(0, CloseAllName()) >= 0)
      {
       ObjectSetInteger(0, CloseAllName(), OBJPROP_XDISTANCE, xCall);
-      ObjectSetInteger(0, CloseAllName(), OBJPROP_YDISTANCE, yMirror);
+      ObjectSetInteger(0, CloseAllName(), OBJPROP_YDISTANCE, yBtn);
      }
 
    // v1.32: BUY/SELL STOP 按钮 — 与 MARKET 同宽、同中心、关于底线镜像对称

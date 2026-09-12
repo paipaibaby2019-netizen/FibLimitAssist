@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.44"
+#property version   "1.45"
 #property description "半自动斐波那契限价下单辅助："
 #property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
 #property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
@@ -24,6 +24,7 @@
 #property description "· v1.35 盈亏比标签接入 OnTick 平时分支, 每 tick 实时刷新"
 #property description "· v1.36 端点位置按周期记忆 (GlobalVariableTemp 临时变量, 重启清空)"
 #property description "· v1.39 移除 kernel32.dll 依赖, 改用纯路径判断 Wine (无需勾选 Allow DLL imports)"
+#property description "· v1.45 新增 FVG 矩形画图 (公允价值缺口): U未填补(绿/红) + P部分填补(蓝/橙) + F完全填补(灰,默认关); 仅扫可见区, 可选叠加 1 个高级别, 每 tick 实时重判"
 #property description "· v1.40 新增交易信号提醒: 强势上涨→弱势回调/强势下跌→弱势反弹 形态识别 + 5维评分 + Alert + 手机推送, 总开关默认关"
 #property description "· v1.41 修复 v1.40 编译错误: iATR() 返回 handle 需 CopyBuffer 取 ATR 值 (此前误作数值 4 参数调用导致 wrong parameters count)"
 #property description "· v1.42 修复 HIDE 后线条不停闪现: RefreshAll 隐藏态早退, 跳过写回可见位置的定位函数"
@@ -99,6 +100,15 @@ input double          InpPullbackDepth    = 0.5;          // [信号] 触发回�
 input int             InpPullbackMinBars  = 1;            // [信号] 回调段最少根数
 input int             InpPullbackMaxBars  = 25;           // [信号] 回调段最多根数
 
+// v1.45 新增: FVG (公允价值缺口) 矩形画图
+input bool               InpFVG_ShowUnfilled     = true;    // [FVG] 显示未填补 (绿/红)
+input bool               InpFVG_ShowPartial     = true;    // [FVG] 显示部分填补 (蓝/橙)
+input bool               InpFVG_ShowFilled       = false;    // [FVG] 显示完全填补 (灰, 默认关)
+input bool               InpFVG_HigherTF_Enabled = false;  // [FVG] 叠加高级别 FVG
+input bool               InpFVG_HigherTF_Auto    = true;    // [FVG] 自动按当前周期选高级别 (Auto=false 时用 InpFVG_HigherTF_Period)
+input ENUM_TIMEFRAMES    InpFVG_HigherTF_Period  = PERIOD_H1;// [FVG] 手动指定的高级周期 (Auto=false 时生效)
+input int                InpFVG_MinPoints        = 0;         // [FVG] 最小缺口宽度 (points), 0=不过滤
+
 //---------------------------- 固定比例 -----------------------------//
 #define RATIO_100 1.00
 #define RATIO_079 0.79
@@ -134,6 +144,16 @@ input int             InpPullbackMaxBars  = 25;           // [信号] 回调段�
 #define CLR_PLUS        C'0,150,60'   // 盈利（绿，带 +）
 #define CLR_MINUS       C'220,0,0'    // 亏损（红，带 -）
 #define CLR_PNL_NEUTRAL C'140,140,140'// 盈亏为零（灰）
+
+// v1.45 新增: FVG 状态配色 (绿/蓝看涨; 红/橙看跌; 灰填补)
+#define CLR_FVG_BULL_OPEN    C'76,175,80'     // 看涨未填补 (绿)
+#define CLR_FVG_BULL_PARTIAL C'33,150,243'    // 看涨部分填补 (蓝)
+#define CLR_FVG_BEAR_OPEN    C'244,67,54'     // 看跌未填补 (红)
+#define CLR_FVG_BEAR_PARTIAL C'255,152,0'     // 看跌部分填补 (橙)
+#define CLR_FVG_FILLED       C'120,120,120'   // 完全填补 (灰, 永远不变)
+// FVG 按钮 (与 HIDE 同色组, sticky 行为)
+#define CLR_FVG_OFF          C'120,120,120'   // SHOW (浅灰)
+#define CLR_FVG_ON           C'200,120,20'    // OFF 状态 (橙黄警示, 与 CLR_HIDE_ON 同)
 
 // v1.24 新增：STEP 上下调整按钮配色 (浅灰背景 + 黑字, 区别于其他深色操作按钮, 视觉更轻)
 #define CLR_STEP_BG     C'200,200,200'// STEP 按钮底色（浅灰）
@@ -189,6 +209,25 @@ datetime g_sigShortID = 0;   // 已提醒的做空波段 ID (顶分型中间 bar
 datetime g_waveT1 = 0, g_waveT2 = 0;  // 波段起点/终点时间 (分型 bar 中央)
 double   g_waveP1 = 0, g_waveP2 = 0;  // 波段起点/终点价格
 int      g_waveDir = DIR_FLAT;        // DIR_UP=上涨(绿线), DIR_DOWN=下跌(红线)
+
+// v1.45 新增: FVG 状态机
+//   g_fvgEnabled: FVG 按钮 sticky 状态 (与 HIDE 同步隐藏/显示)
+//   g_higherTF:   Auto 模式实际生效的高级周期 (OnInit 时根据 _Period 自动选)
+//   g_fvgCache:   缓存上一帧的状态/边界, 减少 ObjectSetInteger 调用
+bool              g_fvgEnabled    = true;                       // FVG 显示开关 (默认开)
+ENUM_TIMEFRAMES   g_higherTF      = PERIOD_H1;             // 实际生效的高级周期
+// FVG 单条记录 (检测 + 状态 紧凑存储)
+//   formTime= 形成时间 (中间 K 线时间), top= 上边界, bot= 下边界, status=0/1/2, dir=DIR_UP/DOWN
+struct FVGRecord
+  {
+   datetime formTime;
+   double   top;
+   double   bot;
+   int      status;   // 0=U未填补 / 1=P部分填补 / 2=F已填补 (F 永远不变)
+   int      dir;      // DIR_UP 看涨, DIR_DOWN 看跌
+   int      tfMin;    // 周期分钟数 (高级别叠加时区分周期显示)
+  };
+FVGRecord g_fvgCache[];
 
 //---------------------------- 工具函数 -----------------------------//
 // v1.39: 移除 kernel32.dll 依赖 — 改用纯路径判断 Wine (EA 不再需要勾选 Allow DLL imports)
@@ -383,6 +422,10 @@ string StopName()          { return g_prefix + "STOP"; }
 string RatioAName()        { return g_prefix + "RATIO_A"; }
 string RatioBName()        { return g_prefix + "RATIO_B"; }
 string RatioCName()        { return g_prefix + "RATIO_C"; }
+// v1.45: FVG 切换按钮对象名 (sticky: 文字 "FVG"/"OFF", 按下=当前 FVG 关闭)
+string FVGButtonName()     { return g_prefix + "FVG_BTN"; }
+// FVG 矩形对象名前缀 (矩形本体 + 标签 — 都要按此前缀清理)
+string FVGPrefix()         { return g_prefix + "FVG_"; }
 // 隐藏/显示按钮对象名 (始终显示，不会随 g_hidden 隐藏)
 string HideName()          { return g_prefix + "HIDE"; }
 // v1.43: 信号波段线对象名 — 独立前缀 FLAW_ (不以 g_prefix 开头), 故 ApplyHidden/ObjectsDeleteAll(g_prefix) 都不会碰它
@@ -482,6 +525,8 @@ void CreateObjects()
    CreateActionButton(MarketName(),        110, "MARKET",        C'140,140,140',"市价下单（止损 = 1.00 ± Range×1%，盈亏比 1:1）");
    CreateActionButton(StopName(),          110, "STOP",          CLR_FLAT_BG,    "突破挂单: BUY STOP (long) 挂在视觉 topPrice + 1 tick, SELL STOP (short) 挂在视觉 botPrice - 1 tick; SL/TP/lot 与 MARKET 共用公式");
    CreateActionButton(HideName(),           80, "HIDE",          CLR_HIDE_OFF,   "隐藏/显示 EA 全部线条与按钮（此按钮自身始终显示）");
+   // v1.45: FVG 切换按钮 (在 HIDE 右侧, sticky 行为, 文字 FVG/OFF, 默认开)
+   CreateActionButton(FVGButtonName(),      80, "FVG",           CLR_FVG_OFF,    "切换 FVG 矩形显示 (公允价值缺口): OFF=隐藏, FVG=显示 (按当前方向颜色 + 未/部分/完全填补状态)");
 
    // v1.08：MKT 两侧的实时盈亏数字标签（OBJ_LABEL 像素定位）
    CreatePnLLabel(PnLLeftName());
@@ -883,6 +928,12 @@ void UpdateBottomButtons()
       ObjectSetInteger(0, RiskName(), OBJPROP_XDISTANCE, xRisk);
       ObjectSetInteger(0, RiskName(), OBJPROP_YDISTANCE, yBtn);
      }
+   // v1.45: FVG 按钮 — RISK 右侧 4px, 与 RISK 同 80 宽
+   if(ObjectFind(0, FVGButtonName()) >= 0)
+     {
+      ObjectSetInteger(0, FVGButtonName(), OBJPROP_XDISTANCE, xRisk + UI(80) + UI(4));
+      ObjectSetInteger(0, FVGButtonName(), OBJPROP_YDISTANCE, yBtn);
+     }
 
    // 中间 MKT
    if(ObjectFind(0, MarketName()) >= 0)
@@ -993,6 +1044,331 @@ void UpdateStopButton(int dir)
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
   }
 
+// v1.45: FVG 按钮文字 + 颜色 + sticky 状态 (与 HIDE 同模式: 开=文字"FVG"+浅灰+弹起, 关=文字"OFF"+橙黄+按下)
+void UpdateFVGButton()
+  {
+   string name = FVGButtonName();
+   if(ObjectFind(0, name) < 0) return;
+   ObjectSetString(0, name, OBJPROP_TEXT, g_fvgEnabled ? "FVG" : "OFF");
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, g_fvgEnabled ? CLR_FVG_OFF : CLR_FVG_ON);
+   ObjectSetInteger(0, name, OBJPROP_STATE, !g_fvgEnabled);  // sticky: 按下=当前关闭
+  }
+
+// v1.45: ENUM_TIMEFRAMES → 分钟数 (用于 FVG 标签时间显示, 不支持范围返回 0)
+int TFToMinutes(ENUM_TIMEFRAMES tf)
+  {
+   switch(tf)
+     {
+      case PERIOD_M1:  return 1;
+      case PERIOD_M2:  return 2;
+      case PERIOD_M3:  return 3;
+      case PERIOD_M4:  return 4;
+      case PERIOD_M5:  return 5;
+      case PERIOD_M6:  return 6;
+      case PERIOD_M10: return 10;
+      case PERIOD_M12: return 12;
+      case PERIOD_M15: return 15;
+      case PERIOD_M20: return 20;
+      case PERIOD_M30: return 30;
+      case PERIOD_H1:  return 60;
+      case PERIOD_H2:  return 120;
+      case PERIOD_H3:  return 180;
+      case PERIOD_H4:  return 240;
+      case PERIOD_H6:  return 360;
+      case PERIOD_H8:  return 480;
+      case PERIOD_H12: return 720;
+      case PERIOD_D1:  return 1440;
+      case PERIOD_W1:  return 10080;
+      case PERIOD_MN1: return 43200;
+      default:         return 0;
+     }
+  }
+
+// v1.45: 按当前图表周期推荐默认高级别
+//   M1/M2→M5, M3→M15, M5→H1, M15/M30/H1→H4, H4→D1
+ENUM_TIMEFRAMES PickDefaultHigherTF(ENUM_TIMEFRAMES current)
+  {
+   switch(current)
+     {
+      case PERIOD_M1:
+      case PERIOD_M2:  return PERIOD_M5;
+      case PERIOD_M3:  return PERIOD_M15;
+      case PERIOD_M5:  return PERIOD_H1;
+      case PERIOD_M15:
+      case PERIOD_M30:
+      case PERIOD_H1:  return PERIOD_H4;
+      case PERIOD_H4:  return PERIOD_D1;
+      default:         return PERIOD_H1;   // 其他 (D1/W1/MN1) 兜底
+     }
+  }
+
+// v1.45: FVG 状态颜色 (按方向 + 状态组合)
+color FVGStatusColor(int status, int dir)
+  {
+   if(status == 2) return CLR_FVG_FILLED;
+   if(dir == DIR_UP)
+      return (status == 0) ? CLR_FVG_BULL_OPEN : CLR_FVG_BULL_PARTIAL;
+   return (status == 0) ? CLR_FVG_BEAR_OPEN : CLR_FVG_BEAR_PARTIAL;
+  }
+
+// v1.45: 状态字符 (U/P/F)
+string FVGStatusChar(int status)
+  {
+   if(status == 0) return "U";
+   if(status == 1) return "P";
+   return "F";
+  }
+
+// v1.45: 检测单个周期在 [firstBar, lastBar] 范围内的 FVG
+//   经典三 K 线: 第 2 根 (中间) 与第 1/3 根的高低对比
+//   看涨 FVG: high[i+2] < low[i]   区间 [high[i+2], low[i]]
+//   看跌 FVG: low[i+2]  > high[i]  区间 [low[i+2], high[i]]
+//   i+2=中间 K 线 (造成缺口的元凶), i=形成缺口的前置, i-1 才是真正的最早 K 线
+//   仅使用已收线 K 线 (iTime(_,_, i) > 0 即视为有效)
+//   返回的 FVGRecord.formTime 默认为中间 K 线时间
+void DetectFVG(ENUM_TIMEFRAMES tf, int firstBarShift, int lastBarShift, FVGRecord &arr[])
+  {
+   ArrayResize(arr, 0);
+   if(firstBarShift < lastBarShift + 3) return;   // 至少需要 3 根 K 线 (i+2, i+1, i)
+   int total = Bars(_Symbol, tf);
+   if(total < 4) return;
+   // 从最新往最旧扫, 中间 K 线 index = i, 形成 FVG 的"形成时间"用 i+2 (中间 K 线) 时间
+   for(int i = lastBarShift; i <= firstBarShift - 2; i++)
+     {
+      // 中间 K 线 (i+2): 造成缺口
+      double midHigh = iHigh(_Symbol, tf, i + 2);
+      double midLow  = iLow (_Symbol, tf, i + 2);
+      // 第 1 根 K 线 (i)
+      double firstHigh = iHigh(_Symbol, tf, i);
+      double firstLow  = iLow (_Symbol, tf, i);
+      // 第 3 根 K 线 (i-1, 已收线)
+      double thirdHigh = iHigh(_Symbol, tf, i - 1);
+      double thirdLow  = iLow (_Symbol, tf, i - 1);
+      if(midHigh <= 0 || midLow <= 0 || firstHigh <= 0 || firstLow <= 0 || thirdHigh <= 0 || thirdLow <= 0)
+         continue;
+      datetime midTime = iTime(_Symbol, tf, i + 2);
+      if(midTime == 0) continue;
+      // 看涨 FVG: 中间 high < 第 1/3 根 low 的较小者
+      double refLow = MathMin(firstLow, thirdLow);
+      double refHigh = MathMax(firstHigh, thirdHigh);
+      int idx = -1;
+      double top = 0, bot = 0;
+      int    dir = DIR_FLAT;
+      if(midHigh < refLow)
+        {
+         top = midHigh;
+         bot = refLow;
+         if(InpFVG_MinPoints > 0 && (bot - top) / _Point < InpFVG_MinPoints) continue;
+         dir = DIR_UP;
+         idx = ArraySize(arr);
+         ArrayResize(arr, idx + 1);
+        }
+      else if(midLow > refHigh)
+        {
+         top = refHigh;
+         bot = midLow;
+         if(InpFVG_MinPoints > 0 && (bot - top) / _Point < InpFVG_MinPoints) continue;
+         dir = DIR_DOWN;
+         idx = ArraySize(arr);
+         ArrayResize(arr, idx + 1);
+        }
+      if(idx < 0) continue;
+      arr[idx].formTime = midTime;
+      arr[idx].top      = top;
+      arr[idx].bot      = bot;
+      arr[idx].status   = 0;     // 初始未填补, ClassifyFVGStatus 会修正
+      arr[idx].dir      = dir;
+      arr[idx].tfMin    = TFToMinutes(tf);
+     }
+  }
+
+// v1.45: 判定单个 FVG 的填补状态 (按 high/low 越过即触发)
+//   从 FVG 形成时间往后扫所有已收线 K 线 (跳过形成时间之前, 避免回看)
+//   F (status=2) 永远不变 — 第一次完全填补就锁定
+void ClassifyFVGStatus(FVGRecord &rec, ENUM_TIMEFRAMES tf)
+  {
+   if(rec.status == 2) return;   // 已锁定 F, 不再判定
+   int total = Bars(_Symbol, tf);
+   if(total <= 1) return;
+   // 从形成时间的下一根 K 线 (shift=0 当前未收, 从 shift=1 开始扫已收线)
+   // 但形成时间就是中间 K 线时间 — shift of midTime: FVG 形成时, 中间 K 线是当时最新已收线 (shift=1)
+   int midShift = iBarShift(_Symbol, tf, rec.formTime);
+   if(midShift < 0) return;
+   // 从 midShift-1 (中间 K 线的下一根) 开始扫 (i.e. shift=midShift-1 已收线)
+   for(int i = midShift - 1; i >= 1; i--)
+     {
+      double h = iHigh(_Symbol, tf, i);
+      double l = iLow (_Symbol, tf, i);
+      if(h <= 0 || l <= 0) continue;
+      // 完全填补: high >= top 且 low <= bot (覆盖整个区间)
+      if(h >= rec.top && l <= rec.bot)
+        {
+         rec.status = 2;
+         return;
+        }
+      // 部分填补: 触到任一边但没穿透
+      if(h >= rec.top || l <= rec.bot)
+         rec.status = 1;
+     }
+  }
+
+// v1.45: 周期时间 → 简短字符串 (用于标签显示)
+string TFShortStr(int minutes)
+  {
+   if(minutes <= 0)     return "?";
+   if(minutes < 60)     return minutes + "m";
+   if(minutes < 1440)   return (minutes / 60) + "h";
+   if(minutes < 10080)  return (minutes / 1440) + "d";
+   return (minutes / 10080) + "w";
+  }
+
+// v1.45: FVG 矩形名 (按 formTime 唯一标识 — 同一时间点只可能有一个 FVG)
+string FVGObjName(datetime formTime, int tfMin)
+  {
+   return g_prefix + "FVG_R_" + IntegerToString((long)formTime) + "_" + IntegerToString(tfMin);
+  }
+
+// v1.45: FVG 状态标签名 (右上角 OBJ_LABEL, 与矩形对齐)
+string FVGLblName(datetime formTime, int tfMin)
+  {
+   return g_prefix + "FVG_L_" + IntegerToString((long)formTime) + "_" + IntegerToString(tfMin);
+  }
+
+// v1.45: 主入口 — 检测 + 分类 + 绘制 FVG 矩形
+//   扫描范围: 图表可见区 (ChartGetInteger(CHART_FIRST_VISIBLE_BAR) + CHART_WIDTH_IN_BARS)
+//   多周期: 当前周期必扫; 启用 InpFVG_HigherTF_Enabled 时额外扫 g_higherTF
+//   每 tick 调用, 实时重判状态 (U/P/F)
+//   未成熟 FVG: 中间 K 线 = shift 0 (当前未收线), formTime 用最近已收线 K 线 + 1 个 TF 周期估算
+void UpdateFVGDisplay()
+  {
+   if(!g_fvgEnabled || g_hidden)
+     {
+      // 关闭或全局隐藏 → 清掉所有 FVG 矩形 (含标签)
+      int total = ObjectsTotal(0, -1, -1);
+      for(int i = total - 1; i >= 0; i--)
+        {
+         string nm = ObjectName(0, i, -1, -1);
+         if(StringFind(nm, FVGPrefix()) == 0)
+            ObjectDelete(0, nm);
+        }
+      return;
+     }
+
+   // 图表可见区 → K 线 shift 范围
+   int firstBar = (int)ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0);
+   int widthBars = (int)ChartGetInteger(0, CHART_WIDTH_IN_BARS, 0);
+   if(firstBar < 0) firstBar = 0;
+   if(widthBars < 3) widthBars = 3;
+   int lastBar = firstBar + widthBars + 5;   // 多扫几根避免边界抖动
+
+   // 收集当前周期 + 可选高级别的 FVG
+   FVGRecord all[];
+   ArrayResize(all, 0);
+
+   // 当前周期
+   FVGRecord cur[];
+   DetectFVG(_Period, lastBar, firstBar, cur);
+   int sz = ArraySize(cur);
+   for(int i = 0; i < sz; i++) { int n = ArraySize(all); ArrayResize(all, n + 1); all[n] = cur[i]; }
+
+   // 高级别叠加 (可选)
+   if(InpFVG_HigherTF_Enabled && g_higherTF > 0 && g_higherTF != _Period)
+     {
+      FVGRecord hi[];
+      DetectFVG(g_higherTF, lastBar, firstBar, hi);
+      sz = ArraySize(hi);
+      for(int i = 0; i < sz; i++) { int n = ArraySize(all); ArrayResize(all, n + 1); all[n] = hi[i]; }
+     }
+
+   // 分类状态 (F 永远不变)
+   int allN = ArraySize(all);
+   for(int i = 0; i < allN; i++)
+     {
+      // 根据 formTime 对应周期判断, 优先用 formTime 所在周期 (优先 _Period, 再 g_higherTF)
+      ENUM_TIMEFRAMES tf = (all[i].tfMin == TFToMinutes(_Period)) ? _Period : g_higherTF;
+      ClassifyFVGStatus(all[i], tf);
+     }
+
+   // 收集所有 FVG 矩形名 (用于清理过期)
+   string existing[];
+   int existingTotal = ObjectsTotal(0, -1, -1);
+   for(int i = 0; i < existingTotal; i++)
+     {
+      string nm = ObjectName(0, i, -1, -1);
+      if(StringFind(nm, FVGPrefix() + "R_") == 0 || StringFind(nm, FVGPrefix() + "L_") == 0)
+       { int eN = ArraySize(existing); ArrayResize(existing, eN + 1); existing[eN] = nm; }
+     }
+
+   // 最新 K 线起点 (X2 右边界)
+   datetime lastBarTime = iTime(_Symbol, _Period, 1);
+   if(lastBarTime == 0) lastBarTime = iTime(_Symbol, _Period, 0);
+
+   // 绘制 / 更新
+   for(int i = 0; i < allN; i++)
+     {
+      bool show = (all[i].status == 0 && InpFVG_ShowUnfilled)
+                || (all[i].status == 1 && InpFVG_ShowPartial)
+                || (all[i].status == 2 && InpFVG_ShowFilled);
+      string rectName = FVGObjName(all[i].formTime, all[i].tfMin);
+      string lblName  = FVGLblName (all[i].formTime, all[i].tfMin);
+
+      // 矩形
+      if(show)
+        {
+         if(ObjectFind(0, rectName) < 0)
+           {
+            ObjectCreate(0, rectName, OBJ_RECTANGLE, 0, all[i].formTime, all[i].top, lastBarTime, all[i].bot);
+            ObjectSetInteger(0, rectName, OBJPROP_BACK, true);     // 背景层, 不挡价格线
+            ObjectSetInteger(0, rectName, OBJPROP_FILL, true);     // 填充
+            ObjectSetInteger(0, rectName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, rectName, OBJPROP_HIDDEN, false);
+            // 虚线用于"未成熟" (中间 K 线 shift=0): formTime 严格等于 iTime(_,_,0) — 但 DetectFVG 已排除 shift<0, 不存在
+            // 此处全部用实线 (未成熟 K 线不可能形成有效 FVG, 因为 iHigh/iLow 返回当前实时值不稳定)
+           }
+         ObjectSetInteger(0, rectName, OBJPROP_TIME1, all[i].formTime);
+         ObjectSetInteger(0, rectName, OBJPROP_TIME2, lastBarTime);
+         ObjectSetInteger(0, rectName, OBJPROP_PRICE1, all[i].top);
+         ObjectSetInteger(0, rectName, OBJPROP_PRICE2, all[i].bot);
+         ObjectSetInteger(0, rectName, OBJPROP_COLOR, FVGStatusColor(all[i].status, all[i].dir));
+         ObjectSetInteger(0, rectName, OBJPROP_HIDDEN, false);
+        }
+      else if(ObjectFind(0, rectName) >= 0)
+         ObjectDelete(0, rectName);
+
+      // 右上角小标签
+      bool showLbl = show && (ObjectGetInteger(0, ChartID(), CHART_WIDTH_IN_PIXELS, 0) > 200);
+      if(showLbl)
+        {
+         string tfStr = TFShortStr(all[i].tfMin);
+         string lblText = FVGStatusChar(all[i].status) + "·" + tfStr;
+         if(ObjectFind(0, lblName) < 0)
+           {
+            ObjectCreate(0, lblName, OBJ_LABEL, 0, lastBarTime, all[i].top);
+            ObjectSetInteger(0, lblName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, lblName, OBJPROP_HIDDEN, false);
+            ObjectSetInteger(0, lblName, OBJPROP_FONTSIZE, Font(7));
+            ObjectSetInteger(0, lblName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+           }
+         ObjectSetString (0, lblName, OBJPROP_TEXT, lblText);
+         ObjectSetInteger(0, lblName, OBJPROP_COLOR, FVGStatusColor(all[i].status, all[i].dir));
+         ObjectSetDouble (0, lblName, OBJPROP_PRICE, all[i].top);
+         ObjectSetInteger(0, lblName, OBJPROP_TIME, lastBarTime);
+         ObjectSetInteger(0, lblName, OBJPROP_HIDDEN, false);
+        }
+      else if(ObjectFind(0, lblName) >= 0)
+         ObjectDelete(0, lblName);
+
+      // 从 existing 中移除已处理的
+      for(int j = ArraySize(existing) - 1; j >= 0; j--)
+         if(existing[j] == rectName || existing[j] == lblName)
+            ArrayRemove(existing, j, 1);
+     }
+
+   // 清理未使用的 (FVG 移出可见区 / 状态变化隐藏 等)
+   for(int i = 0; i < ArraySize(existing); i++)
+      ObjectDelete(0, existing[i]);
+  }
+
 // 应用隐藏/显示状态：遍历所有 EA 对象，HIDE 按钮自身除外
 // v1.07 改进：
 //  · 按钮：OBJPROP_HIDDEN 无效，移出屏幕 (XDISTANCE = -10000)
@@ -1034,6 +1410,7 @@ void RefreshAll()
    if(g_hidden)
      {
       UpdateHideButton();   // 保持 SHOW 文字 + sticky 状态
+      UpdateFVGButton();    // v1.45: FVG 按钮也保持文字/颜色/sticky 状态 (不依赖 EA 主线逻辑)
       ApplyHidden();        // 确保所有对象处于隐藏 (幂等)
       ChartRedraw(0);
       return;
@@ -1064,6 +1441,7 @@ void RefreshAll()
    UpdateStopButton(dir);   // v1.31: 突破挂单按钮文字与配色跟随方向
    UpdateRiskButton();
    UpdateHideButton();
+   UpdateFVGButton();       // v1.45: FVG 切换按钮文字 + 颜色 + sticky 状态
    UpdateTopButtons();
    UpdateBottomButtons();
    UpdatePnLDisplay();   // v1.08：MKT 两侧的实时盈亏数字
@@ -2681,6 +3059,9 @@ int OnInit()
    // 风险档位会话内持久
    LoadRisk();
 
+   // v1.45: FVG 默认高级别周期 — Auto 模式按当前周期映射, 否则用 InpFVG_HigherTF_Period
+   g_higherTF = InpFVG_HigherTF_Auto ? PickDefaultHigherTF(_Period) : InpFVG_HigherTF_Period;
+
    CreateObjects();
    g_lastBalance = AccountInfoDouble(ACCOUNT_BALANCE);
    RefreshAll();
@@ -2712,6 +3093,7 @@ void OnTick()
 
    CheckSignals();      // v1.40 交易信号提醒 (内部判断开关, 关闭时零开销直接返回)
    UpdateWaveLine();    // v1.44 波段画线 (独立于信号提醒, 内部判断开关, 关闭时清理已有线)
+   UpdateFVGDisplay();  // v1.45 FVG 矩形 — 每 tick 实时判定 U→P→F (独立于 g_dirty)
   }
 
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
@@ -2785,6 +3167,15 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       if(sparam == HideName())
         {
          ToggleHide();   // UpdateHideButton 会根据 g_hidden 同步设置 STATE
+         return;
+        }
+      if(sparam == FVGButtonName())
+        {
+         g_fvgEnabled = !g_fvgEnabled;
+         UpdateFVGButton();   // 同步文字/颜色/sticky 状态
+         if(!g_fvgEnabled) UpdateFVGDisplay();   // 关闭时立即清空矩形
+         else               { g_dirty = true; }   // 开启时下次 RefreshAll 重建 (OnTick 检测 g_dirty → 走 RefreshAll)
+         ChartRedraw(0);
          return;
         }
 

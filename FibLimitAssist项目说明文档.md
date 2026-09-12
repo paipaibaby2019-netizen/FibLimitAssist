@@ -90,9 +90,9 @@ price_r = price_1.00 + (1 - r) × (price_0.00 - price_1.00)
 | 按钮 | 文字 | 位置 | 作用 |
 |------|------|------|------|
 | 取消挂单 | `CANCEL` | 最上面那根线的**下方 4px**，**ADJUST 右侧 4px**（v1.61 改为左对齐链第三环，原右对齐 `g_btnX` 废弃） | 一键取消**当前图表品种**的全部挂单（不限魔术号，含手动挂的 LIMIT/STOP/STOP_LIMIT；不含其他品种的挂单） |
-| 一键保本（v1.08 新增） | `EVEN` | 最下面那根线的上方，`CHALF` 左侧（v1.25 起与 CHALF/CALL 等距 4px） | 遍历**当前图表品种**的全部持仓：**盈利仓位的 SL 改到入场价**（锁住利润，标准 breakeven）；**亏损仓位的 TP 改到入场价**（价格回到入场即保本离场）。已是入场价的自动跳过。 |
-| 平一半 | `CHALF`（v1.08 由 CLOSE HALF 改名） | 最下面那根线的上方，**`CALL` 左侧**（v1.25 起等距 4px） | 按手数砍半平掉**当前图表品种**的全部持仓；砍半后 < 品种最小手数则**全平该仓位** |
-| 清仓 | `CALL`（v1.08 由 CLOSE ALL 改名） | 最下面那根线的上方（与 0.79/0.49 按钮右对齐） | 一键平掉**当前图表品种**的全部持仓，**不涉及挂单** |
+| 一键保本（v1.08 新增） | `EVEN` | **v1.62 镜像布局**：最下面那根线的下方 4px（与 STOP 同侧），`x = stepBox + 8`（与顶部 SWAP 左右对齐） | 遍历**当前图表品种**的全部持仓：**盈利仓位的 SL 改到入场价**（锁住利润，标准 breakeven）；**亏损仓位的 TP 改到入场价**（价格回到入场即保本离场）。已是入场价的自动跳过。 |
+| 平一半 | `CHALF`（v1.08 由 CLOSE HALF 改名） | **v1.62 镜像布局**：最下面那根线的下方 4px（与 STOP 同侧），`x = stepBox + 92`（与顶部 ADJUST 左右对齐） | 按手数砍半平掉**当前图表品种**的全部持仓；砍半后 < 品种最小手数则**全平该仓位** |
+| 清仓 | `CALL`（v1.08 由 CLOSE ALL 改名） | **v1.62 镜像布局**：最下面那根线的下方 4px（与 STOP 同侧），`x = stepBox + 176`（与顶部 CANCEL 左右对齐） | 一键平掉**当前图表品种**的全部持仓，**不涉及挂单** |
 
 ### 3.5 功能控制按钮（最下面那根线上方）
 
@@ -464,5 +464,6 @@ Range = |price_1.00 − price_0.00|
 | 1.60 | 2026-09-12 | **F 状态矩形止于填补 K 线**：之前 F（完全填补）矩形的 X2 也用 `lastBarTime`，延伸到最新 K 线，与"已填补不再存在"的语义冲突。修复：① `FVGRecord` 新增 `fillTime` 字段（`DetectFVG` 初始化为 0）；② `ClassifyFVGStatus` 在 F 状态判定时记录 `fillTime = iTime(_, _, i)`（填补那根 K 线的起点）；③ `UpdateFVGDisplay` 绘制时引入局部变量 `rectEndTime`——U/P 用 `lastBarTime`（延伸至最新 K 线）、F 用 `fillTime`（止于填补 K 线起点）；④ 右上角状态标签的 X 锚点时间也同步改为 `rectEndTime`，与矩形右边界对齐。`fillTime == 0` 时 fallback 到 `lastBarTime`（防御性兜底，正常流程下 `iTime` 不会为 0）。 |
 | 1.60 fix | 2026-09-12 | **rectEndTime 作用域 + description 精简**：① v1.60 `rectEndTime` 编译错误修复——原在 `if(show)` 块内声明，但下方 `if(showLbl)` 块也用到，作用域不重叠。提升到 `for` 循环顶部声明；② `#property description too long` × 9 警告修复——MT5 内部对 description 总字符数有限制（约 1024 字节），17 条 description 累计 1551 字符导致从某行起报"too long"。精简到 7 条，累计 405 字符，v1.50-v1.59 的变更记录合并为"详见项目说明文档第 13 章"单行。 |
 | 1.61 | 2026-09-12 | **顶部按钮布局重构 — 左对齐链**：原 LONG (SWAP) 居中 `(w-80)/2`，ADJUST 跟随 LONG 右侧 4px，CANCEL 右对齐 `g_btnX = w-108`——顶部右侧留白过大、与底部 HIDE/RISK/FVG 左列无视觉对齐。重构后顶部三个按钮全部左对齐形成"LONG → ADJUST → CANCEL"链，与底部"HIDE → RISK → FVG"链视觉对齐。改动：① `UpdateSwapButton` X = `stepBox + 8`（STEP 列右 8px，类 HIDE 位置）；② `UpdateAdjustButton` X = `stepBox + 92`（LONG 右侧 4px，类 RISK 跟随 HIDE 模式）；③ `UpdateTopButtons` 中 CANCEL X = `stepBox + 176`（ADJUST 右侧 4px，类 FVG 跟随 RISK 模式），原 `g_btnX` 用法废弃。三个函数各自计算 `stepBox`（少量重复，换 RefreshAll 调用顺序无关性）。**STEP 几何宏 `#define STEP_BTN_*` 上移**——`UpdateSwapButton`/`UpdateAdjustButton` 重构后前置引用 STEP 宏，但 MQL5 按文件顺序解析 `#define`（不像 C 预处理器全单元展开），原位置（`CreateStepButton` 之前）在两个函数之后导致 `undeclared identifier` × 8 编译错误。宏定义上移到 `UpdateSwapButton` 之前（line 600-604），原位置保留一行注释指引。 |
+| 1.62 | 2026-09-12 | **EVEN/CHALF/CALL 镜像到底部下方**：原布局：最下面线上方右侧（`yBtn`），X 右对齐到 `g_btnX`，三按钮等距 4px 排开。新布局：最下面线下方 4px（与 STOP 同侧 `y + UI(4)`），X 分别对齐顶部 SWAP/ADJUST/CANCEL（`stepBox + 8/92/176`），形成"顶部按钮链 + 镜像仓位按钮 + STOP 居中"三层对称布局——顶部"配置 / 取消"，底部镜像"仓位管理 / 突破"。复用 `UpdateBottomButtons` 顶部已声明的 `stepBox`，无需重复计算。原 `g_btnX` 用法完全废弃。 |
 
 > **版本缺口已回补**：v1.10~v1.44 已全部同步至本文档。其中 v1.10/v1.11/v1.12/v1.14 在 git 中无独立提交（本地迭代后随 v1.13 一次性推送，或被后续版本号跳号），内容以代码注释标注为准。

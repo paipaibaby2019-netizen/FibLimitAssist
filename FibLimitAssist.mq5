@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.61"
-#property description "半自动斐波那契限价下单辅助 (v1.61)"
+#property version   "1.62"
+#property description "半自动斐波那契限价下单辅助 (v1.62)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -13,6 +13,7 @@
 #property description "v1.40+ 信号提醒: 强弱回调/反弹形态评分 + Alert推送 + 波段画线(独立于信号,InpWaveLineEnabled)"
 #property description "v1.50-v1.59 修复详情见项目说明文档第 13 章 (描述符总数受限, 变更记录仅保留概要)"
 #property description "v1.61 顶部按钮左对齐链: LONG→ADJUST→CANCEL 类似底部 HIDE→RISK→FVG 链, stepBox+8/92/176 递进"
+#property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -960,21 +961,27 @@ void UpdateBottomButtons()
       ObjectSetInteger(0, PnLRightName(), OBJPROP_YDISTANCE, yBtn + UI(4));
      }
 
-   // 右侧 EVEN / CHALF / CALL（CALL 最右，左 X = g_btnX）
-   if(ObjectFind(0, CloseAllName()) >= 0)
+   // v1.62: 右侧 EVEN / CHALF / CALL — 镜像到顶部按钮链 (X 与 SWAP/ADJUST/CANCEL 对齐, Y = y+UI(4) 与 STOP 同侧)
+   //   原布局: 最下面线上方右侧 (yBtn), X 右对齐到 g_btnX, 三按钮等距 4px 排开
+   //   新布局: 最下面线下方 4px (与 STOP 同侧), X 分别 = stepBox+8 / stepBox+92 / stepBox+176, 与顶部 LONG/ADJUST/CANCEL 完全左右对齐
+   int xEven  = stepBox + UI(8);
+   int xChalf = stepBox + UI(92);
+   int xCall  = stepBox + UI(176);
+   int yMirror = y + UI(4);   // 与 STOP (BUY/SELL STP) 同 Y, 关于最下面线镜像
+   if(ObjectFind(0, EvenName()) >= 0)
      {
-      ObjectSetInteger(0, CloseAllName(), OBJPROP_XDISTANCE, g_btnX);
-      ObjectSetInteger(0, CloseAllName(), OBJPROP_YDISTANCE, yBtn);
+      ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, xEven);
+      ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yMirror);
      }
    if(ObjectFind(0, CloseHalfName()) >= 0)
      {
-      ObjectSetInteger(0, CloseHalfName(), OBJPROP_XDISTANCE, g_btnX - UI(100) - UI(4));
-      ObjectSetInteger(0, CloseHalfName(), OBJPROP_YDISTANCE, yBtn);
+      ObjectSetInteger(0, CloseHalfName(), OBJPROP_XDISTANCE, xChalf);
+      ObjectSetInteger(0, CloseHalfName(), OBJPROP_YDISTANCE, yMirror);
      }
-   if(ObjectFind(0, EvenName()) >= 0)
+   if(ObjectFind(0, CloseAllName()) >= 0)
      {
-      ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, g_btnX - UI(100) - UI(4) - UI(80) - UI(4));  // v1.25: 与 CHALF/CALL 等距 4px
-      ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yBtn);
+      ObjectSetInteger(0, CloseAllName(), OBJPROP_XDISTANCE, xCall);
+      ObjectSetInteger(0, CloseAllName(), OBJPROP_YDISTANCE, yMirror);
      }
 
    // v1.32: BUY/SELL STOP 按钮 — 与 MARKET 同宽、同中心、关于底线镜像对称

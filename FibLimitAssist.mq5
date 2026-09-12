@@ -1263,9 +1263,9 @@ void UpdateFVGDisplay()
    FVGRecord all[];
    ArrayResize(all, 0);
 
-   // 当前周期
+   // 当前周期 (firstBar=最左大shift, lastBar=最右小shift — 顺序须与 DetectFVG 签名一致)
    FVGRecord cur[];
-   DetectFVG(_Period, lastBar, firstBar, cur);
+   DetectFVG(_Period, firstBar, lastBar, cur);
    int sz = ArraySize(cur);
    for(int i = 0; i < sz; i++) { int n = ArraySize(all); ArrayResize(all, n + 1); all[n] = cur[i]; }
 
@@ -1273,7 +1273,7 @@ void UpdateFVGDisplay()
    if(InpFVG_HigherTF_Enabled && g_higherTF > 0 && g_higherTF != _Period)
      {
       FVGRecord hi[];
-      DetectFVG(g_higherTF, lastBar, firstBar, hi);
+      DetectFVG(g_higherTF, firstBar, lastBar, hi);
       sz = ArraySize(hi);
       for(int i = 0; i < sz; i++) { int n = ArraySize(all); ArrayResize(all, n + 1); all[n] = hi[i]; }
      }

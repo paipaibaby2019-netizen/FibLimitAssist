@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.58"
-#property description "半自动斐波那契限价下单辅助 (v1.58)"
+#property version   "1.59"
+#property description "半自动斐波那契限价下单辅助 (v1.59)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45 新增 FVG 矩形: U未填补(绿/红,默认开) + P部分填补(蓝/橙,默认开) + F完全填补(灰,默认关)"
@@ -20,6 +20,7 @@
 #property description "v1.56 FVG 修复: ClassifyFVGStatus 完全填补条件改为方向相关. 看涨FVG需low<=top(回落穿下沿), 看跌FVG需high>=bot(反弹穿上沿). 原条件(h>=bot && l<=top)对看跌FVG永不成立, 永远卡在部分填补"
 #property description "v1.57 FVG 部分填补只画剩余未填补: 新增 FVGRecord.fillLevel 跟踪最深入位置, 绘制时 DIR_UP 底边抬到fillLevel, DIR_DOWN 顶边压到fillLevel. 视觉上只看到真正未填的区间"
 #property description "v1.58 FVG 配色简化: 由 6 色(U绿/U红/P蓝/P橙/F灰 × 边框填充) 简化为 3 色(看涨浅绿 / 看跌浅红 / 填补浅灰), 不再区分 U 与 P, 只看方向"
+#property description "v1.59 FVG 与 HIDE 完全解耦: HIDE 按钮不再隐藏 FVG 按钮 / FVG 矩形 / FVG 标签. FVG 显示状态仅由 FVG 按钮独立控制. FVG 作为独立辅助图层 (类似 FLAW_ 波段线的设计意图)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -1042,15 +1043,14 @@ void UpdateFVGButton()
    if(ObjectFind(0, name) < 0)
      {
       CreateActionButton(name, 80, "FVG", CLR_FVG_OFF,
-                         "切换 FVG 矩形显示 (公允价值缺口): OFF=隐藏, FVG=显示 (按当前方向颜色 + 未/部分/完全填补状态)");
+                         "切换 FVG 矩形显示 (公允价值缺口): OFF=隐藏, FVG=显示 (上涨浅绿 / 下跌浅红 / 完全填补浅灰; v1.58 不再区分未填补与部分填补; v1.59 FVG 完全独立于 HIDE)");
       if(ObjectFind(0, name) < 0) return;
      }
    ObjectSetString(0, name, OBJPROP_TEXT, g_fvgEnabled ? "FVG" : "OFF");
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, g_fvgEnabled ? CLR_FVG_OFF : CLR_FVG_ON);
    ObjectSetInteger(0, name, OBJPROP_STATE, !g_fvgEnabled);  // sticky: 按下=当前关闭
-   // v1.48: 隐藏态下也保持按钮在屏幕可见 (按 HIDE 同款语义)
-   if(g_hidden) ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
-   else         ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
+   // v1.59: FVG 按钮完全独立于 HIDE — 不再跟随 g_hidden 切换 OBJPROP_HIDDEN
+   //   (由 ApplyHidden 跳过 FVG 按钮保证 — HIDE 时按钮位置/可见性不变)
   }
 
 // v1.45: ENUM_TIMEFRAMES → 分钟数 (用于 FVG 标签时间显示, 不支持范围返回 0)
@@ -1263,9 +1263,10 @@ string FVGLblName(datetime formTime, int tfMin)
 //   未成熟 FVG: 中间 K 线 = shift 0 (当前未收线), formTime 用最近已收线 K 线 + 1 个 TF 周期估算
 void UpdateFVGDisplay()
   {
-   if(!g_fvgEnabled || g_hidden)
+   // v1.59: 仅由 g_fvgEnabled 控制, 不再受 g_hidden 影响 — HIDE 隐藏主 fib UI, 但 FVG 仍显示
+   if(!g_fvgEnabled)
      {
-      // v1.48: 关闭或全局隐藏 → 仅清掉 FVG 矩形 (FVG_R_*) + 状态标签 (FVG_L_*)
+      // v1.48: 关闭 → 仅清掉 FVG 矩形 (FVG_R_*) + 状态标签 (FVG_L_*)
       //   不能用 FVG_ 前缀过滤, 因为 FVG_BTN 按钮也是 FVG_ 前缀, 误删按钮 → "点一次消失" bug
       //   必须精确匹配 FVG_R_ / FVG_L_
       int total = ObjectsTotal(0, -1, -1);
@@ -1454,10 +1455,20 @@ void ApplyHidden()
   {
    int total = ObjectsTotal(0, -1, -1);
    string hideObj = HideName();
+   string fvgBtn  = FVGButtonName();
    for(int i = 0; i < total; i++)
      {
       string name = ObjectName(0, i, -1, -1);
       if(StringFind(name, g_prefix) != 0) continue;   // 仅本实例对象
+      // v1.59: FVG 系列 (按钮 + 矩形 + 标签) 完全独立于 HIDE — HIDE 不动它
+      //   FVG 按钮: 仍可见 (用户主动切换显示用)
+      //   FVG 矩形: 仍可见 (作为独立的辅助图层)
+      //   FVG 标签: 仍可见
+      //   与波段线 (FLAW_ 独立前缀) 设计意图一致 — FVG 也是"独立于主 fib UI 的辅助图层"
+      if(name == fvgBtn
+      || StringFind(name, g_prefix + "FVG_R_") == 0
+      || StringFind(name, g_prefix + "FVG_L_") == 0)
+         continue;
       bool hide = g_hidden && (name != hideObj);       // HIDE 按钮自身永远显示
       int type = (int)ObjectGetInteger(0, name, OBJPROP_TYPE, 0);
       if(type == OBJ_BUTTON)

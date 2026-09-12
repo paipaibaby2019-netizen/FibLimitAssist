@@ -1191,14 +1191,15 @@ void ClassifyFVGStatus(FVGRecord &rec, ENUM_TIMEFRAMES tf)
       double h = iHigh(_Symbol, tf, i);
       double l = iLow (_Symbol, tf, i);
       if(h <= 0 || l <= 0) continue;
-      // 完全填补: high >= top 且 low <= bot (覆盖整个区间)
-      if(h >= rec.top && l <= rec.bot)
+      // 注意: DetectFVG 赋值时 top=下沿(低价), bot=上沿(高价) — 即 top < bot
+      // 完全填补: K 线覆盖整段区间 → high 触上沿(bot) 且 low 触下沿(top)
+      if(h >= rec.bot && l <= rec.top)
         {
          rec.status = 2;
          return;
         }
-      // 部分填补: 触到任一边但没穿透
-      if(h >= rec.top || l <= rec.bot)
+      // 部分填补: K 线与区间有重叠 (high>=下沿 且 low<=上沿) 但未完全穿透
+      if(h >= rec.top && l <= rec.bot)
          rec.status = 1;
      }
   }

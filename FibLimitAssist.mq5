@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.65"
-#property description "半自动斐波那契限价下单辅助 (v1.65)"
+#property version   "1.66"
+#property description "半自动斐波那契限价下单辅助 (v1.66)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -17,6 +17,7 @@
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
 #property description "v1.65 EVEN/CHALF/CALL 移到顶部第二排 (CANCEL 正下方): X 对齐 LONG/ADJUST/CANCEL (stepBox+8/92/176), Y = 第一排 + 按钮高 + 4px 间距 — 形成顶部 3×2 对称矩阵"
+#property description "v1.66 修 v1.65 错位: 第二排 CALL X 从 176 改 196 — 因 CHALF 宽 100, 原 stepBox+8/92/176 让 CHALF 右沿(192)与 CALL 左沿(176)重叠 16px; 改为按实际宽度递进 stepBox+8/92/196"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -902,8 +903,9 @@ void UpdateTopButtons()
       ObjectSetInteger(0, cancelName, OBJPROP_YDISTANCE, yBtn);
      }
 
-   // v1.65: 第二排 EVEN / CHALF / CALL — 顶部按钮正下方, X 与 LONG/ADJUST/CANCEL 完全对齐
-   //   Y = 第一排 Y (yBtn) + 按钮高 UI(22) + 间距 UI(4), 形成"LONG/EVEN | ADJUST/CHALF | CANCEL/CALL"上下对齐三列
+   // v1.66: 第二排 EVEN / CHALF / CALL — 顶部按钮正下方, X 按实际按钮宽度递进 (避免 CHALF 与 CALL 重叠)
+   //   EVEN(80)→CHALF(100)→CALL(100), 间距均 4px: 8 / 92 / 196
+   //   v1.65 错方案: 直接复用顶部 X (stepBox+8/92/176) — 因 CHALF 宽 100, 右沿到 192, 与 CALL 左沿 176 重叠 16px
    int yBtnRow2 = yBtn + UI(22) + UI(4);
    if(ObjectFind(0, EvenName()) >= 0)
      {
@@ -917,7 +919,7 @@ void UpdateTopButtons()
      }
    if(ObjectFind(0, CloseAllName()) >= 0)
      {
-      ObjectSetInteger(0, CloseAllName(), OBJPROP_XDISTANCE, stepBox + UI(8) + UI(80) + UI(4) + UI(80) + UI(4));
+      ObjectSetInteger(0, CloseAllName(), OBJPROP_XDISTANCE, stepBox + UI(8) + UI(80) + UI(4) + UI(100) + UI(4));
       ObjectSetInteger(0, CloseAllName(), OBJPROP_YDISTANCE, yBtnRow2);
      }
   }

@@ -14,7 +14,7 @@
 #property description "v1.50 FVG 修复: OnInit 立即调 UpdateFVGDisplay, 周末/非交易时段加载也能立即看到 FVG (原仅 OnTick 触发, 收市无新 tick 一直为空)"
 #property description "v1.51 FVG 修复: 修正 CHART_FIRST_VISIBLE_BAR shift 方向错误, lastBar 不再算反, DetectFVG 能真正扫描可见区"
 #property description "v1.52 FVG 修复: ① DetectFVG 调用参数顺序搞反(firstBar/lastBar), guard 恒触发 return 导致全部漏检; ② ClassifyFVGStatus 的 top/bot 方向搞反(top=下沿/bot=上沿 却按 top=上沿 判定), 完全填补条件退化成低碰上沿即 Filled, 大量 FVG 被隐藏"
-#property description "v1.53 FVG 半透明填充: alpha=48 (约19%不透明), 边框全不透明保持清晰轮廓, 新增 FVGStatusFillColor 函数 + OBJPROP_BGCOLOR 设置"
+#property description "v1.53 FVG 半透明填充: ARGB alpha 在部分 MT5 build 上不生效, 改用同色系浅色调做填充 (边框深、填充浅), 兼容所有版本"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -131,17 +131,17 @@ input int                InpFVG_MinPoints        = 0;         // [FVG] 最小缺
 #define CLR_PNL_NEUTRAL C'140,140,140'// 盈亏为零（灰）
 
 // v1.45 新增: FVG 状态配色 (绿/蓝看涨; 红/橙看跌; 灰填补)
-//   alpha=48 (0~255 约 19% 不透明) 让填充半透明不挡价格线, 边框用同色全不透明保持清晰轮廓
-#define CLR_FVG_BULL_OPEN    C'76,175,80'          // 看涨未填补 边框 (绿)
-#define CLR_FVG_BULL_OPEN_F  C'48,76,175,80'       // 看涨未填补 填充 (半透明绿)
-#define CLR_FVG_BULL_PARTIAL C'33,150,243'         // 看涨部分填补 边框 (蓝)
-#define CLR_FVG_BULL_PARTIAL_F C'48,33,150,243'    // 看涨部分填补 填充 (半透明蓝)
-#define CLR_FVG_BEAR_OPEN    C'244,67,54'          // 看跌未填补 边框 (红)
-#define CLR_FVG_BEAR_OPEN_F  C'48,244,67,54'       // 看跌未填补 填充 (半透明红)
-#define CLR_FVG_BEAR_PARTIAL C'255,152,0'          // 看跌部分填补 边框 (橙)
-#define CLR_FVG_BEAR_PARTIAL_F C'48,255,152,0'     // 看跌部分填补 填充 (半透明橙)
-#define CLR_FVG_FILLED       C'120,120,120'       // 完全填补 边框 (灰, 永远不变)
-#define CLR_FVG_FILLED_F     C'48,120,120,120'     // 完全填补 填充 (半透明灰)
+//   边框用全不透明深色保持清晰轮廓, 填充用同色系浅色 (不依赖 ARGB alpha, 兼容所有 MT5 build)
+#define CLR_FVG_BULL_OPEN    C'76,175,80'          // 看涨未填补 边框 (深绿)
+#define CLR_FVG_BULL_OPEN_F  C'180,220,185'        // 看涨未填补 填充 (浅绿)
+#define CLR_FVG_BULL_PARTIAL C'33,150,243'         // 看涨部分填补 边框 (深蓝)
+#define CLR_FVG_BULL_PARTIAL_F C'180,210,245'      // 看涨部分填补 填充 (浅蓝)
+#define CLR_FVG_BEAR_OPEN    C'244,67,54'          // 看跌未填补 边框 (深红)
+#define CLR_FVG_BEAR_OPEN_F  C'245,185,180'        // 看跌未填补 填充 (浅红/粉)
+#define CLR_FVG_BEAR_PARTIAL C'255,152,0'          // 看跌部分填补 边框 (深橙)
+#define CLR_FVG_BEAR_PARTIAL_F C'255,220,160'      // 看跌部分填补 填充 (浅橙)
+#define CLR_FVG_FILLED       C'120,120,120'       // 完全填补 边框 (深灰, 永远不变)
+#define CLR_FVG_FILLED_F     C'200,200,200'        // 完全填补 填充 (浅灰)
 // FVG 按钮 (与 HIDE 同色组, sticky 行为)
 #define CLR_FVG_OFF          C'120,120,120'   // SHOW (浅灰)
 #define CLR_FVG_ON           C'200,120,20'    // OFF 状态 (橙黄警示, 与 CLR_HIDE_ON 同)

@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.46"
+#property version   "1.47"
 #property description "半自动斐波那契限价下单辅助 (v1.46)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
@@ -1306,17 +1306,20 @@ void UpdateFVGDisplay()
             // 虚线用于"未成熟" (中间 K 线 shift=0): formTime 严格等于 iTime(_,_,0) — 但 DetectFVG 已排除 shift<0, 不存在
             // 此处全部用实线 (未成熟 K 线不可能形成有效 FVG, 因为 iHigh/iLow 返回当前实时值不稳定)
            }
-         ObjectSetDouble (0, rectName, OBJPROP_TIME1,  (double)all[i].formTime);
-         ObjectSetDouble (0, rectName, OBJPROP_TIME2,  (double)lastBarTime);
-         ObjectSetDouble (0, rectName, OBJPROP_PRICE1, all[i].top);
-         ObjectSetDouble (0, rectName, OBJPROP_PRICE2, all[i].bot);
+         // v1.47: OBJ_RECTANGLE 坐标修改必须用 ObjectMove(角点索引), 不能用 OBJPROP_TIME1/2
+         //   这两个 OBJPROP_TIME1/2/PRICE1/2 在当前 MT5 build 下 ObjectSetDouble 报 undeclared identifier
+         //   ObjectMove(0, name, 0, t, p) 改角点 0 (左上); (0, name, 1, t, p) 改角点 1 (右下)
+         ObjectMove(0, rectName, 0, all[i].formTime, all[i].top);   // 角点 0: FVG 形成时刻 + 顶
+         ObjectMove(0, rectName, 1, lastBarTime,    all[i].bot);   // 角点 1: 最新K线起点 + 底
          ObjectSetInteger(0, rectName, OBJPROP_COLOR,  FVGStatusColor(all[i].status, all[i].dir));
          ObjectSetInteger(0, rectName, OBJPROP_HIDDEN, false);
         }
       else if(ObjectFind(0, rectName) >= 0)
          ObjectDelete(0, rectName);
 
-      // 右上角小标签
+      // v1.47: 右上角小标签 — OBJ_LABEL 在 MQL5 中是屏幕坐标对象, OBJPROP_TIME/PRICE 不适用
+      //   必须先用 ChartTimePriceToXY 把时间/价格转屏幕坐标, 再用 OBJPROP_XDISTANCE/YDISTANCE 设置
+      //   锚点 ANCHOR_RIGHT_UPPER: 标签右上角对齐到 (x, y), 即标签正好显示在矩形顶边的右上侧
       bool showLbl = show && (ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0) > 200);
       if(showLbl)
         {
@@ -1324,16 +1327,24 @@ void UpdateFVGDisplay()
          string lblText = FVGStatusChar(all[i].status) + "·" + tfStr;
          if(ObjectFind(0, lblName) < 0)
            {
-            ObjectCreate(0, lblName, OBJ_LABEL, 0, lastBarTime, all[i].top);
+            ObjectCreate(0, lblName, OBJ_LABEL, 0, 0, 0);  // 创建时第 4-5 参数(time, price)对 OBJ_LABEL 实际无效
             ObjectSetInteger(0, lblName, OBJPROP_SELECTABLE, false);
             ObjectSetInteger(0, lblName, OBJPROP_HIDDEN, false);
             ObjectSetInteger(0, lblName, OBJPROP_FONTSIZE, Font(7));
-            ObjectSetInteger(0, lblName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+            ObjectSetInteger(0, lblName, OBJPROP_ANCHOR,    ANCHOR_RIGHT_UPPER);
+            ObjectSetInteger(0, lblName, OBJPROP_CORNER,    CORNER_LEFT_UPPER);
+           }
+         // 计算标签目标屏幕位置: 跟随 FVG 顶边的"当前K线起点"时间
+         int px = 0, py = 0;
+         if(ChartTimePriceToXY(0, 0, lastBarTime, all[i].top, px, py))
+           {
+            // 标签宽约 36 px (字符宽 7 × 5 字符), 右上对齐后让标签左边缘紧贴矩形右上角
+            int tagW = 36;
+            ObjectSetInteger(0, lblName, OBJPROP_XDISTANCE, px - tagW);
+            ObjectSetInteger(0, lblName, OBJPROP_YDISTANCE, py - 2);
            }
          ObjectSetString (0, lblName, OBJPROP_TEXT, lblText);
          ObjectSetInteger(0, lblName, OBJPROP_COLOR, FVGStatusColor(all[i].status, all[i].dir));
-         ObjectSetDouble (0, lblName, OBJPROP_PRICE, all[i].top);
-         ObjectSetDouble (0, lblName, OBJPROP_TIME,  (double)lastBarTime);
          ObjectSetInteger(0, lblName, OBJPROP_HIDDEN, false);
         }
       else if(ObjectFind(0, lblName) >= 0)

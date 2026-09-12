@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.64"
-#property description "半自动斐波那契限价下单辅助 (v1.64)"
+#property version   "1.65"
+#property description "半自动斐波那契限价下单辅助 (v1.65)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -16,6 +16,7 @@
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
+#property description "v1.65 EVEN/CHALF/CALL 移到顶部第二排 (CANCEL 正下方): X 对齐 LONG/ADJUST/CANCEL (stepBox+8/92/176), Y = 第一排 + 按钮高 + 4px 间距 — 形成顶部 3×2 对称矩阵"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -881,6 +882,7 @@ void ApplyStepDrag(double r, double price)
 
 // 顶部按钮 — v1.61: 改为左对齐链 (LONG → ADJUST → CANCEL), LONG/ADJUST 由各自函数定位, 这里只设 CANCEL
 // v1.26: 改到线下方 (y+4), 与 SWAP/ADJUST 三个按钮统一在 topPrice 线下方 4px, 不被线穿过
+// v1.65: 新增第二排 — EVEN / CHALF / CALL 放在 CANCEL 正下方, X 对齐顶部 LONG/ADJUST/CANCEL (stepBox+8/92/176)
 void UpdateTopButtons()
   {
    double topPrice = MathMax(g_p1, g_p0);
@@ -899,11 +901,30 @@ void UpdateTopButtons()
       ObjectSetInteger(0, cancelName, OBJPROP_XDISTANCE, xCancel);
       ObjectSetInteger(0, cancelName, OBJPROP_YDISTANCE, yBtn);
      }
+
+   // v1.65: 第二排 EVEN / CHALF / CALL — 顶部按钮正下方, X 与 LONG/ADJUST/CANCEL 完全对齐
+   //   Y = 第一排 Y (yBtn) + 按钮高 UI(22) + 间距 UI(4), 形成"LONG/EVEN | ADJUST/CHALF | CANCEL/CALL"上下对齐三列
+   int yBtnRow2 = yBtn + UI(22) + UI(4);
+   if(ObjectFind(0, EvenName()) >= 0)
+     {
+      ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, stepBox + UI(8));
+      ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yBtnRow2);
+     }
+   if(ObjectFind(0, CloseHalfName()) >= 0)
+     {
+      ObjectSetInteger(0, CloseHalfName(), OBJPROP_XDISTANCE, stepBox + UI(8) + UI(80) + UI(4));
+      ObjectSetInteger(0, CloseHalfName(), OBJPROP_YDISTANCE, yBtnRow2);
+     }
+   if(ObjectFind(0, CloseAllName()) >= 0)
+     {
+      ObjectSetInteger(0, CloseAllName(), OBJPROP_XDISTANCE, stepBox + UI(8) + UI(80) + UI(4) + UI(80) + UI(4));
+      ObjectSetInteger(0, CloseAllName(), OBJPROP_YDISTANCE, yBtnRow2);
+     }
   }
 
 // 最下面那根线的全部按钮 (v1.08)：
-//  左侧：HIDE(80) | RISK(80) | ...空隙... | PL_LEFT(标签) | MARKET(110 居中) | PL_RIGHT(标签) | ...空隙... | EVEN(80) | CHALF(100) | CALL(100)
-//  右侧等距（v1.25）：EVEN(80) | gap 4px | CHALF(100) | gap 4px | CALL(100)  → 三个按钮视觉间距一致
+//  左侧：HIDE(80) | RISK(80) | FVG(80) | ... | MARKET(110 居中) | ...
+//  右侧仓位按钮 (EVEN/CHALF/CALL) 已在 v1.65 移到顶部第二排 (UpdateTopButtons)
 void UpdateBottomButtons()
   {
    double botPrice = MathMin(g_p1, g_p0);
@@ -966,24 +987,8 @@ void UpdateBottomButtons()
       ObjectSetInteger(0, PnLRightName(), OBJPROP_YDISTANCE, yBtn + UI(4));
      }
 
-   // v1.64: 右侧 EVEN / CHALF / CALL — 恢复 v1.61 原方案 (右侧 g_btnX 右对齐, 三按钮等距 4px)
-   //   v1.63 错方案: X 对齐顶部按钮 + Y yBtn (与 HIDE/RISK/FVG 同行) — 用户改回原布局
-   //   v1.64 撤回: 恢复 g_btnX 等距右对齐布局, HIDE/RISK/FVG 同步回到底部左侧
-   if(ObjectFind(0, CloseAllName()) >= 0)
-     {
-      ObjectSetInteger(0, CloseAllName(), OBJPROP_XDISTANCE, g_btnX);
-      ObjectSetInteger(0, CloseAllName(), OBJPROP_YDISTANCE, yBtn);
-     }
-   if(ObjectFind(0, CloseHalfName()) >= 0)
-     {
-      ObjectSetInteger(0, CloseHalfName(), OBJPROP_XDISTANCE, g_btnX - UI(100) - UI(4));
-      ObjectSetInteger(0, CloseHalfName(), OBJPROP_YDISTANCE, yBtn);
-     }
-   if(ObjectFind(0, EvenName()) >= 0)
-     {
-      ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, g_btnX - UI(100) - UI(4) - UI(80) - UI(4));  // v1.25: 与 CHALF/CALL 等距 4px
-      ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yBtn);
-     }
+   // v1.65: 右侧 EVEN / CHALF / CALL 已移到顶部第二排 (UpdateTopButtons), 这里不再设置
+   //   历史: v1.61 右侧 g_btnX 右对齐 → v1.62/v1.63 镜像到底部/顶部对齐 → v1.64 撤回 → v1.65 最终方案: 顶部第二排
 
    // v1.32: BUY/SELL STOP 按钮 — 与 MARKET 同宽、同中心、关于底线镜像对称
    //  MARKET: 顶边距底线 4px 上方 (yBtn = y - 26)

@@ -90,9 +90,9 @@ price_r = price_1.00 + (1 - r) × (price_0.00 - price_1.00)
 | 按钮 | 文字 | 位置 | 作用 |
 |------|------|------|------|
 | 取消挂单 | `CANCEL` | 最上面那根线的**下方 4px**，**ADJUST 右侧 4px**（v1.61 改为左对齐链第三环，原右对齐 `g_btnX` 废弃） | 一键取消**当前图表品种**的全部挂单（不限魔术号，含手动挂的 LIMIT/STOP/STOP_LIMIT；不含其他品种的挂单） |
-| 一键保本（v1.08 新增） | `EVEN` | **v1.64 恢复原方案**：最下面那根线的上方 26px（与 MARKET 同行 `yBtn`），X = `g_btnX - 100 - 4 - 80 - 4`（右侧右对齐链最左，与 CHALF/CALL 等距 4px）。v1.62/v1.63 镜像方案撤销。 | 遍历**当前图表品种**的全部持仓：**盈利仓位的 SL 改到入场价**（锁住利润，标准 breakeven）；**亏损仓位的 TP 改到入场价**（价格回到入场即保本离场）。已是入场价的自动跳过。 |
-| 平一半 | `CHALF`（v1.08 由 CLOSE HALF 改名） | **v1.64 恢复原方案**：最下面那根线的上方 26px（与 MARKET 同行 `yBtn`），X = `g_btnX - 100 - 4`（右侧右对齐链中间，与 CALL 右侧相邻 4px） | 按手数砍半平掉**当前图表品种**的全部持仓；砍半后 < 品种最小手数则**全平该仓位** |
-| 清仓 | `CALL`（v1.08 由 CLOSE ALL 改名） | **v1.64 恢复原方案**：最下面那根线的上方 26px（与 MARKET 同行 `yBtn`），X = `g_btnX`（右侧右对齐链最右） | 一键平掉**当前图表品种**的全部持仓，**不涉及挂单** |
+| 一键保本（v1.08 新增） | `EVEN` | **v1.65 移到顶部第二排**：X = `stepBox + 8`（与顶部 LONG/SWAP 同 X，形成上下一列），Y = `yBtnTop + UI(22) + UI(4)`（顶部第一排正下方，间距 4px） | 遍历**当前图表品种**的全部持仓：**盈利仓位的 SL 改到入场价**（锁住利润，标准 breakeven）；**亏损仓位的 TP 改到入场价**（价格回到入场即保本离场）。已是入场价的自动跳过。 |
+| 平一半 | `CHALF`（v1.08 由 CLOSE HALF 改名） | **v1.65 移到顶部第二排**：X = `stepBox + 92`（与顶部 ADJUST 同 X），Y 同上 | 按手数砍半平掉**当前图表品种**的全部持仓；砍半后 < 品种最小手数则**全平该仓位** |
+| 清仓 | `CALL`（v1.08 由 CLOSE ALL 改名） | **v1.65 移到顶部第二排**：X = `stepBox + 176`（与顶部 CANCEL 同 X），Y 同上 | 一键平掉**当前图表品种**的全部持仓，**不涉及挂单** |
 
 ### 3.5 功能控制按钮（最下面那根线上方）
 
@@ -469,5 +469,7 @@ Range = |price_1.00 − price_0.00|
 | 1.63 | 2026-09-12 | **完整对称布局 + HIDE/RISK/FVG 上移顶部**：① EVEN/CHALF/CALL 改回 yBtn（最下面线上方 26px，与 MARKET 同行），X = `stepBox + 8/92/176` 与顶部 SWAP/ADJUST/CANCEL 左右对齐——形成"顶部 6 按钮链 + 底部镜像 3 仓位按钮 + 中间 MARKET/STOP"三层对称；② HIDE/RISK/FVG 从底部左侧移到顶部 CANCEL 右侧（X = `xCancel + 100 + 4` / +84 / +84），形成顶部一长链 `LONG → ADJUST → CANCEL → HIDE → RISK → FVG`，释放底部左侧位置；③ `UpdateTopButtons` 增加 HIDE/RISK/FVG 三个 `ObjectSetInteger` 设置；④ `UpdateBottomButtons` 中原 HIDE/RISK/FVG 位置代码删除。 |
 | 1.63 revert | 2026-09-12 | **v1.63 验证后用户改回原方案**：顶部 6 按钮一长链 + 底部镜像 3 仓位按钮的实际效果与用户预期不符——用户希望 HIDE/RISK/FVG 留在底部左侧（与 LONG/ADJUST/CANCEL 形成左右镜像），EVEN/CHALF/CALL 维持右侧右对齐。**v1.64 撤销 v1.63**： |
 | 1.64 | 2026-09-12 | **撤销 v1.63 — 恢复 v1.61 布局**：① `UpdateTopButtons` 删除 v1.63 新增的 HIDE/RISK/FVG `ObjectSetInteger` 设置（顶部按钮链回到 `LONG → ADJUST → CANCEL` 3 个）；② `UpdateBottomButtons` 恢复 HIDE/RISK/FVG 到左侧 `stepBox + 8/92/176` 位置（与顶部 LONG/ADJUST/CANCEL 左右镜像对齐）；③ EVEN/CHALF/CALL 恢复右侧 `g_btnX` 右对齐（`g_btnX - 100 - 4 - 80 - 4` / `g_btnX - 100 - 4` / `g_btnX`），三按钮等距 4px。视觉布局回到 v1.61 状态。 |
+| 1.64 → 1.65 | 2026-09-12 | **用户改回最终方案 — EVEN/CHALF/CALL 顶部第二排**：v1.64 恢复"底部右侧右对齐"后用户再次提出新需求——EVEN/CHALF/CALL 应在顶部第一排（LONG/ADJUST/CANCEL）**正下方第二排**，X 严格对齐顶部三个按钮（`stepBox + 8/92/176`），Y = 第一排 Y + 按钮高 + 4px 间距，形成"LONG/EVEN \| ADJUST/CHALF \| CANCEL/CALL"上下 3×2 对称矩阵。**v1.65 实现**： |
+| 1.65 | 2026-09-12 | **EVEN/CHALF/CALL 移到顶部第二排**：① `UpdateTopButtons` 新增三个按钮的 `ObjectSetInteger` 设置——X = `stepBox + 8/92/176`（与顶部 LONG/ADJUST/CANCEL 完全对齐），Y = `yBtn + UI(22) + UI(4)`（第一排 Y + 按钮高 + 4px 间距）；② `UpdateBottomButtons` 删除原 v1.61-v1.64 三个按钮的 `g_btnX` 右对齐定位块；③ 函数注释同步更新（`UpdateBottomButtons` 头部注释的"右侧 EVEN/CHALF/CALL"行删除）。最终布局：顶部 3×2 对称矩阵（LONG/EVEN \| ADJUST/CHALF \| CANCEL/CALL）+ 中间 0.79/0.49 挂单 + 底部左侧 HIDE/RISK/FVG + 底部居中 MARKET/STP。 |
 
 > **版本缺口已回补**：v1.10~v1.44 已全部同步至本文档。其中 v1.10/v1.11/v1.12/v1.14 在 git 中无独立提交（本地迭代后随 v1.13 一次性推送，或被后续版本号跳号），内容以代码注释标注为准。

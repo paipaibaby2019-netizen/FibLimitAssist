@@ -4,14 +4,15 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.50"
-#property description "半自动斐波那契限价下单辅助 (v1.50)"
+#property version   "1.51"
+#property description "半自动斐波那契限价下单辅助 (v1.51)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45 新增 FVG 矩形: U未填补(绿/红,默认开) + P部分填补(蓝/橙,默认开) + F完全填补(灰,默认关)"
 #property description "FVG 选项: 仅可见区扫描 + 高级别叠加(按当前周期自动映射) + 最小宽度过滤 + 每 tick 实时重判"
 #property description "v1.40+ 信号提醒: 强弱回调/反弹形态评分 + Alert推送 + 波段画线(独立于信号,InpWaveLineEnabled)"
 #property description "v1.50 FVG 修复: OnInit 立即调 UpdateFVGDisplay, 周末/非交易时段加载也能立即看到 FVG (原仅 OnTick 触发, 收市无新 tick 一直为空)"
+#property description "v1.51 FVG 修复: 修正 CHART_FIRST_VISIBLE_BAR shift 方向错误, lastBar 不再算反, DetectFVG 能真正扫描可见区"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -1248,11 +1249,15 @@ void UpdateFVGDisplay()
      }
 
    // 图表可见区 → K 线 shift 范围
-   int firstBar = (int)ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0);
-   int widthBars = (int)ChartGetInteger(0, CHART_WIDTH_IN_BARS, 0);
+   // v1.51 修复: shift 编号从右到左, CHART_FIRST_VISIBLE_BAR 已是最左(最大 shift)
+   //   原代码 lastBar = firstBar + widthBars + 5 导致 lastBar > firstBar,
+   //   DetectFVG 的 guard (firstBarShift < lastBarShift + 2) 直接 return, 所以一个 FVG 都检测不到
+   int firstBar = (int)ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0);   // 最左可见 K 线 shift (最大)
+   int widthBars = (int)ChartGetInteger(0, CHART_WIDTH_IN_BARS, 0);      // 可见区宽度
    if(firstBar < 0) firstBar = 0;
    if(widthBars < 3) widthBars = 3;
-   int lastBar = firstBar + widthBars + 5;   // 多扫几根避免边界抖动
+   int lastBar = MathMax(0, firstBar - widthBars + 1);                   // 最右端 shift (靠近当前 K 线, 最小)
+   lastBar = MathMax(0, lastBar - 5);                                    // 向右多扩 5 根, 避免边界抖动
 
    // 收集当前周期 + 可选高级别的 FVG
    FVGRecord all[];

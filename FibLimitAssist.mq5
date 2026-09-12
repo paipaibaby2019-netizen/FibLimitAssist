@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.54"
-#property description "半自动斐波那契限价下单辅助 (v1.54)"
+#property version   "1.55"
+#property description "半自动斐波那契限价下单辅助 (v1.55)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45 新增 FVG 矩形: U未填补(绿/红,默认开) + P部分填补(蓝/橙,默认开) + F完全填补(灰,默认关)"
@@ -16,6 +16,7 @@
 #property description "v1.52 FVG 修复: ① DetectFVG 调用参数顺序搞反(firstBar/lastBar), guard 恒触发 return 导致全部漏检; ② ClassifyFVGStatus 的 top/bot 方向搞反(top=下沿/bot=上沿 却按 top=上沿 判定), 完全填补条件退化成低碰上沿即 Filled, 大量 FVG 被隐藏"
 #property description "v1.53 FVG 半透明填充: ARGB alpha 在部分 MT5 build 上不生效, 改用同色系浅色调做填充 (边框深、填充浅), 兼容所有版本"
 #property description "v1.54 FVG 填充修复: OBJPROP_BGCOLOR 对 OBJ_RECTANGLE 无效 (填充色由 OBJPROP_COLOR 控制), 删除 BGCOLOR 调用, 直接用浅色调 COLOR"
+#property description "v1.55 波段画线总开关默认改为关 (InpWaveLineEnabled=false), 开箱不画波段线, 需用户手动开启"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -58,7 +59,7 @@ input double InpFontScale = 0.0;  // [UI] 字号缩放系数 (0=按平台智能�
 // 与"交易信号提醒"完全解耦: 只要检测周期里找到一对有效分型(顶+底)且波段幅度达标就画线,
 // 不依赖信号提醒的"触达 50% / 未跌破起点 / 评分达标"等触发条件.
 // 关闭时 OnTick 不会运行波段扫描, 已画的线会被清除.
-input bool InpWaveLineEnabled = true; // [波段画线] 总开关 (默认开, 与 InpSignalEnabled 完全独立)
+input bool InpWaveLineEnabled = false; // [波段画线] 总开关 (默认关, 与 InpSignalEnabled 完全独立)
 
 //---------------------------- 交易信号提醒 (v1.40) -----------------------------//
 // 强势上涨→弱势回调 形态识别 + 5维评分 + PC弹窗(Alert) + 手机推送(SendNotification)

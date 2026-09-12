@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.57"
-#property description "半自动斐波那契限价下单辅助 (v1.57)"
+#property version   "1.58"
+#property description "半自动斐波那契限价下单辅助 (v1.58)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45 新增 FVG 矩形: U未填补(绿/红,默认开) + P部分填补(蓝/橙,默认开) + F完全填补(灰,默认关)"
@@ -19,6 +19,7 @@
 #property description "v1.55 波段画线总开关默认改为关 (InpWaveLineEnabled=false), 开箱不画波段线, 需用户手动开启"
 #property description "v1.56 FVG 修复: ClassifyFVGStatus 完全填补条件改为方向相关. 看涨FVG需low<=top(回落穿下沿), 看跌FVG需high>=bot(反弹穿上沿). 原条件(h>=bot && l<=top)对看跌FVG永不成立, 永远卡在部分填补"
 #property description "v1.57 FVG 部分填补只画剩余未填补: 新增 FVGRecord.fillLevel 跟踪最深入位置, 绘制时 DIR_UP 底边抬到fillLevel, DIR_DOWN 顶边压到fillLevel. 视觉上只看到真正未填的区间"
+#property description "v1.58 FVG 配色简化: 由 6 色(U绿/U红/P蓝/P橙/F灰 × 边框填充) 简化为 3 色(看涨浅绿 / 看跌浅红 / 填补浅灰), 不再区分 U 与 P, 只看方向"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -134,18 +135,11 @@ input int                InpFVG_MinPoints        = 0;         // [FVG] 最小缺
 #define CLR_MINUS       C'220,0,0'    // 亏损（红，带 -）
 #define CLR_PNL_NEUTRAL C'140,140,140'// 盈亏为零（灰）
 
-// v1.45 新增: FVG 状态配色 (绿/蓝看涨; 红/橙看跌; 灰填补)
-//   边框用全不透明深色保持清晰轮廓, 填充用同色系极浅色 (不依赖 ARGB alpha, 兼容所有 MT5 build)
-#define CLR_FVG_BULL_OPEN    C'76,175,80'          // 看涨未填补 边框 (深绿)
-#define CLR_FVG_BULL_OPEN_F  C'210,235,215'        // 看涨未填补 填充 (极浅绿)
-#define CLR_FVG_BULL_PARTIAL C'33,150,243'         // 看涨部分填补 边框 (深蓝)
-#define CLR_FVG_BULL_PARTIAL_F C'210,225,248'      // 看涨部分填补 填充 (极浅蓝)
-#define CLR_FVG_BEAR_OPEN    C'244,67,54'          // 看跌未填补 边框 (深红)
-#define CLR_FVG_BEAR_OPEN_F  C'250,210,208'        // 看跌未填补 填充 (极浅红/粉)
-#define CLR_FVG_BEAR_PARTIAL C'255,152,0'          // 看跌部分填补 边框 (深橙)
-#define CLR_FVG_BEAR_PARTIAL_F C'255,235,200'      // 看跌部分填补 填充 (极浅橙)
-#define CLR_FVG_FILLED       C'120,120,120'       // 完全填补 边框 (深灰, 永远不变)
-#define CLR_FVG_FILLED_F     C'225,225,225'        // 完全填补 填充 (极浅灰)
+// v1.58 新增: FVG 配色 — 简化为 3 色: 上涨(浅绿) / 下跌(浅红) / 完全填补(浅灰)
+//   不再区分未填补 vs 部分填补, 只看方向. v1.57 之前的 6 色过于细分, 视觉干扰大.
+#define CLR_FVG_BULL    C'210,235,215'        // 看涨 (U/P 都用此色, 浅绿)
+#define CLR_FVG_BEAR    C'250,210,208'        // 看跌 (U/P 都用此色, 浅红/粉)
+#define CLR_FVG_FILLED  C'225,225,225'        // 完全填补 (浅灰, 默认隐藏)
 // FVG 按钮 (与 HIDE 同色组, sticky 行为)
 #define CLR_FVG_OFF          C'120,120,120'   // SHOW (浅灰)
 #define CLR_FVG_ON           C'200,120,20'    // OFF 状态 (橙黄警示, 与 CLR_HIDE_ON 同)
@@ -522,7 +516,7 @@ void CreateObjects()
    CreateActionButton(StopName(),          110, "STOP",          CLR_FLAT_BG,    "突破挂单: BUY STOP (long) 挂在视觉 topPrice + 1 tick, SELL STOP (short) 挂在视觉 botPrice - 1 tick; SL/TP/lot 与 MARKET 共用公式");
    CreateActionButton(HideName(),           80, "HIDE",          CLR_HIDE_OFF,   "隐藏/显示 EA 全部线条与按钮（此按钮自身始终显示）");
    // v1.45: FVG 切换按钮 (在 HIDE 右侧, sticky 行为, 文字 FVG/OFF, 默认开)
-   CreateActionButton(FVGButtonName(),      80, "FVG",           CLR_FVG_OFF,    "切换 FVG 矩形显示 (公允价值缺口): OFF=隐藏, FVG=显示 (按当前方向颜色 + 未/部分/完全填补状态)");
+   CreateActionButton(FVGButtonName(),      80, "FVG",           CLR_FVG_OFF,    "切换 FVG 矩形显示 (公允价值缺口): OFF=隐藏, FVG=显示 (上涨浅绿 / 下跌浅红 / 完全填补浅灰; v1.58 不再区分未填补与部分填补)");
 
    // v1.08：MKT 两侧的实时盈亏数字标签（OBJ_LABEL 像素定位）
    CreatePnLLabel(PnLLeftName());
@@ -1107,14 +1101,13 @@ ENUM_TIMEFRAMES PickDefaultHigherTF(ENUM_TIMEFRAMES current)
      }
   }
 
-// v1.54: FVG 状态颜色 — OBJ_RECTANGLE 的填充色由 OBJPROP_COLOR 控制 (OBJPROP_BGCOLOR 对矩形无效)
-//   用浅色让填充不挡价格线; 边框与填充同色, 清晰度次要
+// v1.58: FVG 状态颜色 — 简化为方向二选一 + 填补灰
+//   OBJ_RECTANGLE 的填充色由 OBJPROP_COLOR 控制 (OBJPROP_BGCOLOR 对矩形无效)
 color FVGStatusColor(int status, int dir)
   {
-   if(status == 2) return CLR_FVG_FILLED_F;
-   if(dir == DIR_UP)
-      return (status == 0) ? CLR_FVG_BULL_OPEN_F : CLR_FVG_BULL_PARTIAL_F;
-   return (status == 0) ? CLR_FVG_BEAR_OPEN_F : CLR_FVG_BEAR_PARTIAL_F;
+   if(status == 2) return CLR_FVG_FILLED;
+   if(dir == DIR_UP)   return CLR_FVG_BULL;
+   return CLR_FVG_BEAR;
   }
 
 // v1.45: 状态字符 (U/P/F)

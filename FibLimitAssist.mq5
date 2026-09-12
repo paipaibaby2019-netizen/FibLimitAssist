@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.51"
-#property description "半自动斐波那契限价下单辅助 (v1.51)"
+#property version   "1.52"
+#property description "半自动斐波那契限价下单辅助 (v1.52)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45 新增 FVG 矩形: U未填补(绿/红,默认开) + P部分填补(蓝/橙,默认开) + F完全填补(灰,默认关)"
@@ -13,6 +13,7 @@
 #property description "v1.40+ 信号提醒: 强弱回调/反弹形态评分 + Alert推送 + 波段画线(独立于信号,InpWaveLineEnabled)"
 #property description "v1.50 FVG 修复: OnInit 立即调 UpdateFVGDisplay, 周末/非交易时段加载也能立即看到 FVG (原仅 OnTick 触发, 收市无新 tick 一直为空)"
 #property description "v1.51 FVG 修复: 修正 CHART_FIRST_VISIBLE_BAR shift 方向错误, lastBar 不再算反, DetectFVG 能真正扫描可见区"
+#property description "v1.52 FVG 修复: ① DetectFVG 调用参数顺序搞反(firstBar/lastBar), guard 恒触发 return 导致全部漏检; ② ClassifyFVGStatus 的 top/bot 方向搞反(top=下沿/bot=上沿 却按 top=上沿 判定), 完全填补条件退化成低碰上沿即 Filled, 大量 FVG 被隐藏"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -1134,11 +1135,6 @@ void DetectFVG(ENUM_TIMEFRAMES tf, int firstBarShift, int lastBarShift, FVGRecor
       double midLow  = iLow (_Symbol, tf, i);
       double c3High  = iHigh(_Symbol, tf, i - 1);
       double c3Low   = iLow (_Symbol, tf, i - 1);
-      // v1.51 调试: 打印第一个已收盘组合 (i=3 → C1=4 Mid=3 C3=2, 全已收线)
-      if(i == 3)
-         PrintFormat("FVG_DEB[%s] i=3 C1=(%.5f,%.5f) Mid=(%.5f,%.5f) C3=(%.5f,%.5f) c1High<c3Low=%d c1Low>c3High=%d",
-                     _Symbol, c1Low, c1High, midLow, midHigh, c3Low, c3High,
-                     (int)(c1High < c3Low), (int)(c1Low > c3High));
       if(c1High <= 0 || c1Low <= 0 || midHigh <= 0 || midLow <= 0 || c3High <= 0 || c3Low <= 0)
          continue;
       datetime c1Time = iTime(_Symbol, tf, i + 1);

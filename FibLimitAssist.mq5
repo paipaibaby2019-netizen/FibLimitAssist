@@ -8,20 +8,10 @@
 #property description "半自动斐波那契限价下单辅助 (v1.60)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
-#property description "v1.45 新增 FVG 矩形: U未填补(绿/红,默认开) + P部分填补(蓝/橙,默认开) + F完全填补(灰,默认关)"
-#property description "FVG 选项: 仅可见区扫描 + 高级别叠加(按当前周期自动映射) + 最小宽度过滤 + 每 tick 实时重判"
+#property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
+#property description "FVG 完全独立于 HIDE; F 状态矩形止于填补 K 线起点; 部分填补只画剩余未填补 (v1.57)"
 #property description "v1.40+ 信号提醒: 强弱回调/反弹形态评分 + Alert推送 + 波段画线(独立于信号,InpWaveLineEnabled)"
-#property description "v1.50 FVG 修复: OnInit 立即调 UpdateFVGDisplay, 周末/非交易时段加载也能立即看到 FVG (原仅 OnTick 触发, 收市无新 tick 一直为空)"
-#property description "v1.51 FVG 修复: 修正 CHART_FIRST_VISIBLE_BAR shift 方向错误, lastBar 不再算反, DetectFVG 能真正扫描可见区"
-#property description "v1.52 FVG 修复: ① DetectFVG 调用参数顺序搞反(firstBar/lastBar), guard 恒触发 return 导致全部漏检; ② ClassifyFVGStatus 的 top/bot 方向搞反(top=下沿/bot=上沿 却按 top=上沿 判定), 完全填补条件退化成低碰上沿即 Filled, 大量 FVG 被隐藏"
-#property description "v1.53 FVG 半透明填充: ARGB alpha 在部分 MT5 build 上不生效, 改用同色系浅色调做填充 (边框深、填充浅), 兼容所有版本"
-#property description "v1.54 FVG 填充修复: OBJPROP_BGCOLOR 对 OBJ_RECTANGLE 无效 (填充色由 OBJPROP_COLOR 控制), 删除 BGCOLOR 调用, 直接用浅色调 COLOR"
-#property description "v1.55 波段画线总开关默认改为关 (InpWaveLineEnabled=false), 开箱不画波段线, 需用户手动开启"
-#property description "v1.56 FVG 修复: ClassifyFVGStatus 完全填补条件改为方向相关. 看涨FVG需low<=top(回落穿下沿), 看跌FVG需high>=bot(反弹穿上沿). 原条件(h>=bot && l<=top)对看跌FVG永不成立, 永远卡在部分填补"
-#property description "v1.57 FVG 部分填补只画剩余未填补: 新增 FVGRecord.fillLevel 跟踪最深入位置, 绘制时 DIR_UP 底边抬到fillLevel, DIR_DOWN 顶边压到fillLevel. 视觉上只看到真正未填的区间"
-#property description "v1.58 FVG 配色简化: 由 6 色(U绿/U红/P蓝/P橙/F灰 × 边框填充) 简化为 3 色(看涨浅绿 / 看跌浅红 / 填补浅灰), 不再区分 U 与 P, 只看方向"
-#property description "v1.59 FVG 与 HIDE 完全解耦: HIDE 按钮不再隐藏 FVG 按钮 / FVG 矩形 / FVG 标签. FVG 显示状态仅由 FVG 按钮独立控制. FVG 作为独立辅助图层 (类似 FLAW_ 波段线的设计意图)"
-#property description "v1.60 F 状态矩形止于填补 K 线: 新增 FVGRecord.fillTime 记录填补那根 K 线起点. 绘制时 U/P 用 lastBarTime (延伸至最新 K 线), F 用 fillTime (止于填补 K 线起点, 不再延伸至最新 K 线). 标签位置跟随矩形右边界同步调整"
+#property description "v1.50-v1.59 修复详情见项目说明文档第 13 章 (描述符总数受限, 变更记录仅保留概要)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -1347,16 +1337,18 @@ void UpdateFVGDisplay()
       string rectName = FVGObjName(all[i].formTime, all[i].tfMin);
       string lblName  = FVGLblName (all[i].formTime, all[i].tfMin);
 
+      // v1.60: 矩形右边界按状态分支
+      //   U (未填补) / P (部分填补) → X2 = lastBarTime (延伸至最新 K 线起点, 缺口当前仍存在)
+      //   F (完全填补)               → X2 = fillTime  (止于填补那根 K 线起点, 不再延伸)
+      //   fillTime 为 0 时 (极端) fallback 到 lastBarTime
+      // 提到循环顶部声明, 供下方 show 分支 (矩形绘制) 与 showLbl 分支 (标签 X 锚点) 共用
+      datetime rectEndTime = (all[i].status == 2 && all[i].fillTime > 0)
+                             ? all[i].fillTime
+                             : lastBarTime;
+
       // 矩形
       if(show)
         {
-         // v1.60: 矩形右边界按状态分支
-         //   U (未填补) / P (部分填补) → X2 = lastBarTime (延伸至最新 K 线起点, 缺口当前仍存在)
-         //   F (完全填补)               → X2 = fillTime  (止于填补那根 K 线起点, 不再延伸)
-         //   fillTime 为 0 时 (极端) fallback 到 lastBarTime
-         datetime rectEndTime = (all[i].status == 2 && all[i].fillTime > 0)
-                                ? all[i].fillTime
-                                : lastBarTime;
          if(ObjectFind(0, rectName) < 0)
            {
             ObjectCreate(0, rectName, OBJ_RECTANGLE, 0, all[i].formTime, all[i].top, rectEndTime, all[i].bot);

@@ -91,8 +91,8 @@ price_r = price_1.00 + (1 - r) × (price_0.00 - price_1.00)
 |------|------|------|------|
 | 取消挂单 | `CANCEL` | 最上面那根线的**下方 4px**，**ADJUST 右侧 4px**（v1.61 改为左对齐链第三环，原右对齐 `g_btnX` 废弃） | 一键取消**当前图表品种**的全部挂单（不限魔术号，含手动挂的 LIMIT/STOP/STOP_LIMIT；不含其他品种的挂单） |
 | 一键保本（v1.08 新增） | `EVEN` | **v1.65 移到顶部第二排**：X = `stepBox + 8`（与顶部 LONG/SWAP 同 X，形成上下一列），Y = `yBtnTop + UI(22) + UI(4)`（顶部第一排正下方，间距 4px） | 遍历**当前图表品种**的全部持仓：**盈利仓位的 SL 改到入场价**（锁住利润，标准 breakeven）；**亏损仓位的 TP 改到入场价**（价格回到入场即保本离场）。已是入场价的自动跳过。 |
-| 平一半 | `CHALF`（v1.08 由 CLOSE HALF 改名） | **v1.65 移到顶部第二排 / v1.66 X 修正**：X = `stepBox + 92`（与顶部 ADJUST 同 X），Y 同上。**v1.66 修复**：原复用顶部链 X (176) 因 CHALF 宽 100 与 CALL 重叠 16px | 按手数砍半平掉**当前图表品种**的全部持仓；砍半后 < 品种最小手数则**全平该仓位** |
-| 清仓 | `CALL`（v1.08 由 CLOSE ALL 改名） | **v1.65 移到顶部第二排 / v1.66 X 修正**：X = `stepBox + 196`（v1.66 由 176 改为 196 — 按实际宽度递进 EV80+gap4+CH100+gap4），Y 同上 | 一键平掉**当前图表品种**的全部持仓，**不涉及挂单** |
+| 平一半 | `CHALF`（v1.08 由 CLOSE HALF 改名） | **v1.65 移到顶部第二排 / v1.67 宽 100→80**：X = `stepBox + 92`（与顶部 ADJUST 同 X），Y 同上。**v1.67 改宽**：CHALF 由 100 缩为 80，与 ADJUST 完全对齐，X 位置恢复 v1.65 的 stepBox+92 | 按手数砍半平掉**当前图表品种**的全部持仓；砍半后 < 品种最小手数则**全平该仓位** |
+| 清仓 | `CALL`（v1.08 由 CLOSE ALL 改名） | **v1.65 移到顶部第二排 / v1.67 X 恢复**：X = `stepBox + 176`（与顶部 CANCEL 同 X），Y 同上。CALL 宽度保持 100 与 CANCEL 完全对齐 | 一键平掉**当前图表品种**的全部持仓，**不涉及挂单** |
 
 ### 3.5 功能控制按钮（最下面那根线上方）
 
@@ -473,5 +473,7 @@ Range = |price_1.00 − price_0.00|
 | 1.65 | 2026-09-12 | **EVEN/CHALF/CALL 移到顶部第二排**：① `UpdateTopButtons` 新增三个按钮的 `ObjectSetInteger` 设置——X = `stepBox + 8/92/176`（与顶部 LONG/ADJUST/CANCEL 完全对齐），Y = `yBtn + UI(22) + UI(4)`（第一排 Y + 按钮高 + 4px 间距）；② `UpdateBottomButtons` 删除原 v1.61-v1.64 三个按钮的 `g_btnX` 右对齐定位块；③ 函数注释同步更新（`UpdateBottomButtons` 头部注释的"右侧 EVEN/CHALF/CALL"行删除）。最终布局：顶部 3×2 对称矩阵（LONG/EVEN \| ADJUST/CHALF \| CANCEL/CALL）+ 中间 0.79/0.49 挂单 + 底部左侧 HIDE/RISK/FVG + 底部居中 MARKET/STP。 |
 | 1.65 → 1.66 | 2026-09-12 | **用户反馈 CHALF/CALL 重叠**：v1.65 直接复用顶部链 X (stepBox+8/92/176) 看似对齐，实则因 CHALF 宽 100 ≠ ADJUST 宽 80，导致 CHALF 右沿 (`92+100=192`) 与 CALL 左沿 (`176`) 重叠 16px（CHALF 文字被 CALL 边框遮住，视觉上两按钮融为一块）。**v1.66 修复**： |
 | 1.66 | 2026-09-12 | **修 v1.65 第二排 CALL X 重叠 bug**：CALL X 从 `stepBox + 176` 改为 `stepBox + 196`，按实际按钮宽度递进 `EVEN(80) + 4 + CHALF(100) + 4 = 196`。三按钮 X 终值：`stepBox + 8/92/196`。EVEN/CHALF 与顶部 LONG/ADJUST 左对齐保持不变；CALL 比 CANCEL 右移 20px（因 CHALF 比 ADJUST 宽 20px），保证 4px 间距。 |
+| 1.66 → 1.67 | 2026-09-12 | **用户提出第三种方案 — 让按钮宽度对齐而非 X 偏移**：v1.66 的 X 偏移方案（`stepBox+8/92/196`）虽解决了重叠，但 CALL 相对 CANCEL 右移 20px 视觉上不对称。用户希望直接让第二排按钮宽度等于顶部对应按钮宽度，恢复干净的 `stepBox+8/92/176` 递进，三对按钮左右边缘完全对齐。**v1.67 实现**： |
+| 1.67 | 2026-09-12 | **第二排 CHALF 宽 100→80 — 按钮宽度与顶部对齐**：① `CreateActionButton(CloseHalfName(), 100, "CHALF", ...)` 改为 `(CloseHalfName(), 80, "CHALF", ...)`（CHALF 与 ADJUST 同样 80 宽）；② `UpdateTopButtons` 中 CALL X 从 `stepBox+8+80+4+100+4 = 196` 改回 `stepBox+8+80+4+80+4 = 176`（与顶部 CANCEL 同 X）；③ 撤回 v1.66 的 X 偏移方案，顶部两排共 6 按钮形成"宽 80/80/100"两两对齐的 3×2 矩阵。最终 X 终值：`stepBox + 8/92/176`（与 v1.65 一致）；宽度：EVEN(80)=LONG(80) / CHALF(80)=ADJUST(80) / CALL(100)=CANCEL(100)。 |
 
 > **版本缺口已回补**：v1.10~v1.44 已全部同步至本文档。其中 v1.10/v1.11/v1.12/v1.14 在 git 中无独立提交（本地迭代后随 v1.13 一次性推送，或被后续版本号跳号），内容以代码注释标注为准。

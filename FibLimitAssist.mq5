@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.48"
+#property version   "1.49"
 #property description "半自动斐波那契限价下单辅助 (v1.46)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
@@ -1109,64 +1109,63 @@ string FVGStatusChar(int status)
    return "F";
   }
 
-// v1.45: 检测单个周期在 [firstBar, lastBar] 范围内的 FVG
-//   经典三 K 线: 第 2 根 (中间) 与第 1/3 根的高低对比
-//   看涨 FVG: high[i+2] < low[i]   区间 [high[i+2], low[i]]
-//   看跌 FVG: low[i+2]  > high[i]  区间 [low[i+2], high[i]]
-//   i+2=中间 K 线 (造成缺口的元凶), i=形成缺口的前置, i-1 才是真正的最早 K 线
-//   仅使用已收线 K 线 (iTime(_,_, i) > 0 即视为有效)
-//   返回的 FVGRecord.formTime 默认为中间 K 线时间
+// v1.48: 检测单个周期在 [firstBar, lastBar] 范围内的 FVG
+//   经典 ICT 定义 (用户确认): 按时间顺序 3 根 K 线
+//     C1 = 中间 K 线左侧 1 根 (shift=i+1)
+//     Mid = 中间 K 线 (shift=i)
+//     C3 = 中间 K 线右侧 1 根 (shift=i-1, 必须已收线)
+//   看涨 FVG: C1.high < C3.low  → 区间 [C1.high, C3.low], 方向 DIR_UP (价格上跳)
+//   看跌 FVG: C1.low  > C3.high → 区间 [C3.high, C1.low], 方向 DIR_DOWN
+//   formTime = C3 开始时间 (iTime(i-1)) = FVG 在 C3 收线后被确认
 void DetectFVG(ENUM_TIMEFRAMES tf, int firstBarShift, int lastBarShift, FVGRecord &arr[])
   {
    ArrayResize(arr, 0);
-   if(firstBarShift < lastBarShift + 3) return;   // 至少需要 3 根 K 线 (i+2, i+1, i)
+   if(firstBarShift < lastBarShift + 2) return;   // 至少需要 3 根 (i+1, i, i-1, 必须 i-1 >= 1 已收线)
    int total = Bars(_Symbol, tf);
-   if(total < 4) return;
-   // 从最新往最旧扫, 中间 K 线 index = i, 形成 FVG 的"形成时间"用 i+2 (中间 K 线) 时间
-   for(int i = lastBarShift; i <= firstBarShift - 2; i++)
+   if(total < 3) return;
+   for(int i = lastBarShift + 1; i <= firstBarShift - 1; i++)   // i = 中间 K 线
      {
-      // 中间 K 线 (i+2): 造成缺口
-      double midHigh = iHigh(_Symbol, tf, i + 2);
-      double midLow  = iLow (_Symbol, tf, i + 2);
-      // 第 1 根 K 线 (i)
-      double firstHigh = iHigh(_Symbol, tf, i);
-      double firstLow  = iLow (_Symbol, tf, i);
-      // 第 3 根 K 线 (i-1, 已收线)
-      double thirdHigh = iHigh(_Symbol, tf, i - 1);
-      double thirdLow  = iLow (_Symbol, tf, i - 1);
-      if(midHigh <= 0 || midLow <= 0 || firstHigh <= 0 || firstLow <= 0 || thirdHigh <= 0 || thirdLow <= 0)
+      // C1 (左侧更早) | Mid | C3 (右侧更近)
+      double c1High  = iHigh(_Symbol, tf, i + 1);
+      double c1Low   = iLow (_Symbol, tf, i + 1);
+      double midHigh = iHigh(_Symbol, tf, i);
+      double midLow  = iLow (_Symbol, tf, i);
+      double c3High  = iHigh(_Symbol, tf, i - 1);
+      double c3Low   = iLow (_Symbol, tf, i - 1);
+      if(c1High <= 0 || c1Low <= 0 || midHigh <= 0 || midLow <= 0 || c3High <= 0 || c3Low <= 0)
          continue;
-      datetime midTime = iTime(_Symbol, tf, i + 2);
-      if(midTime == 0) continue;
-      // 看涨 FVG: 中间 high < 第 1/3 根 low 的较小者
-      double refLow = MathMin(firstLow, thirdLow);
-      double refHigh = MathMax(firstHigh, thirdHigh);
+      datetime c1Time = iTime(_Symbol, tf, i + 1);
+      datetime midTime = iTime(_Symbol, tf, i);
+      datetime c3Time = iTime(_Symbol, tf, i - 1);
+      if(c1Time == 0 || midTime == 0 || c3Time == 0) continue;
+      // 看涨: C1.high < C3.low (左侧 K 线高点 < 右侧 K 线低点 → 价格跳空)
+      // 看跌: C1.low > C3.high
       int idx = -1;
       double top = 0, bot = 0;
       int    dir = DIR_FLAT;
-      if(midHigh < refLow)
+      if(c1High < c3Low)
         {
-         top = midHigh;
-         bot = refLow;
+         top = c1High;
+         bot = c3Low;
          if(InpFVG_MinPoints > 0 && (bot - top) / _Point < InpFVG_MinPoints) continue;
          dir = DIR_UP;
          idx = ArraySize(arr);
          ArrayResize(arr, idx + 1);
         }
-      else if(midLow > refHigh)
+      else if(c1Low > c3High)
         {
-         top = refHigh;
-         bot = midLow;
+         top = c3High;
+         bot = c1Low;
          if(InpFVG_MinPoints > 0 && (bot - top) / _Point < InpFVG_MinPoints) continue;
          dir = DIR_DOWN;
          idx = ArraySize(arr);
          ArrayResize(arr, idx + 1);
         }
       if(idx < 0) continue;
-      arr[idx].formTime = midTime;
+      arr[idx].formTime = c3Time;  // FVG 在 C3 收线时确认
       arr[idx].top      = top;
       arr[idx].bot      = bot;
-      arr[idx].status   = 0;     // 初始未填补, ClassifyFVGStatus 会修正
+      arr[idx].status   = 0;       // 初始未填补, ClassifyFVGStatus 会修正
       arr[idx].dir      = dir;
       arr[idx].tfMin    = TFToMinutes(tf);
      }
@@ -1371,6 +1370,29 @@ void UpdateFVGDisplay()
    // 清理未使用的 (FVG 移出可见区 / 状态变化隐藏 等)
    for(int i = 0; i < ArraySize(existing); i++)
       ObjectDelete(0, existing[i]);
+
+   // v1.48: 调试输出 — 每个新柱打印一次 (避免每 tick 噪音)
+   static datetime s_lastFvgDebugBar = 0;
+   datetime curBar = iTime(_Symbol, _Period, 0);
+   if(curBar != s_lastFvgDebugBar && curBar > 0)
+     {
+      s_lastFvgDebugBar = curBar;
+      int nU = 0, nP = 0, nF = 0;
+      for(int i = 0; i < ArraySize(all); i++)
+        {
+         if(all[i].status == 0) nU++;
+         else if(all[i].status == 1) nP++;
+         else                     nF++;
+        }
+      bool showUnfilled = InpFVG_ShowUnfilled, showPartial = InpFVG_ShowPartial, showFilled = InpFVG_ShowFilled;
+      PrintFormat("FVG[%s]: total=%d (U=%d%s P=%d%s F=%d%s) Bars=%d range=[%d..%d]",
+                  TimeToString(curBar, TIME_DATE|TIME_MINUTES),
+                  ArraySize(all),
+                  nU, (showUnfilled ? "✓" : "✗"),
+                  nP, (showPartial  ? "✓" : "✗"),
+                  nF, (showFilled   ? "✓" : "✗"),
+                  Bars(_Symbol, _Period), lastBar, firstBar);
+     }
   }
 
 // 应用隐藏/显示状态：遍历所有 EA 对象，HIDE 按钮自身除外

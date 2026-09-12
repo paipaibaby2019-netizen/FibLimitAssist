@@ -1203,13 +1203,20 @@ void ClassifyFVGStatus(FVGRecord &rec, ENUM_TIMEFRAMES tf)
       double l = iLow (_Symbol, tf, i);
       if(h <= 0 || l <= 0) continue;
       // 注意: DetectFVG 赋值时 top=下沿(低价), bot=上沿(高价) — 即 top < bot
-      // 完全填补: K 线覆盖整段区间 → high 触上沿(bot) 且 low 触下沿(top)
-      if(h >= rec.bot && l <= rec.top)
+      // 完全填补: 价格穿越了整个缺口区间 — 方向相关!
+      //   看涨 FVG (DIR_UP): 回落填补, 价格从上往下穿 → 只要 low 触及/跌破下沿(top) 即完全填补
+      //   看跌 FVG (DIR_DOWN): 反弹填补, 价格从下往上穿 → 只要 high 触及/突破上沿(bot) 即完全填补
+      if(rec.dir == DIR_UP && l <= rec.top)
         {
          rec.status = 2;
          return;
         }
-      // 部分填补: K 线与区间有重叠 (high>=下沿 且 low<=上沿) 但未完全穿透
+      if(rec.dir == DIR_DOWN && h >= rec.bot)
+        {
+         rec.status = 2;
+         return;
+        }
+      // 部分填补: K 线与区间有重叠 (方向无关, high>=下沿 且 low<=上沿)
       if(h >= rec.top && l <= rec.bot)
          rec.status = 1;
      }

@@ -4,13 +4,14 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.49"
-#property description "半自动斐波那契限价下单辅助 (v1.46)"
+#property version   "1.50"
+#property description "半自动斐波那契限价下单辅助 (v1.50)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45 新增 FVG 矩形: U未填补(绿/红,默认开) + P部分填补(蓝/橙,默认开) + F完全填补(灰,默认关)"
 #property description "FVG 选项: 仅可见区扫描 + 高级别叠加(按当前周期自动映射) + 最小宽度过滤 + 每 tick 实时重判"
 #property description "v1.40+ 信号提醒: 强弱回调/反弹形态评分 + Alert推送 + 波段画线(独立于信号,InpWaveLineEnabled)"
+#property description "v1.50 FVG 修复: OnInit 立即调 UpdateFVGDisplay, 周末/非交易时段加载也能立即看到 FVG (原仅 OnTick 触发, 收市无新 tick 一直为空)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -3092,6 +3093,7 @@ int OnInit()
    g_lastBalance = AccountInfoDouble(ACCOUNT_BALANCE);
    RefreshAll();
    g_dirty = false;
+   UpdateFVGDisplay();   // v1.50: OnInit 即调一次, 周末/非交易时段加载 EA 也能立即看到 FVG (原仅 OnTick 触发, 收市无新 tick 一直空白)
    return INIT_SUCCEEDED;
   }
 

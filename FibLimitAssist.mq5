@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.59"
-#property description "半自动斐波那契限价下单辅助 (v1.59)"
+#property version   "1.60"
+#property description "半自动斐波那契限价下单辅助 (v1.60)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45 新增 FVG 矩形: U未填补(绿/红,默认开) + P部分填补(蓝/橙,默认开) + F完全填补(灰,默认关)"
@@ -21,6 +21,7 @@
 #property description "v1.57 FVG 部分填补只画剩余未填补: 新增 FVGRecord.fillLevel 跟踪最深入位置, 绘制时 DIR_UP 底边抬到fillLevel, DIR_DOWN 顶边压到fillLevel. 视觉上只看到真正未填的区间"
 #property description "v1.58 FVG 配色简化: 由 6 色(U绿/U红/P蓝/P橙/F灰 × 边框填充) 简化为 3 色(看涨浅绿 / 看跌浅红 / 填补浅灰), 不再区分 U 与 P, 只看方向"
 #property description "v1.59 FVG 与 HIDE 完全解耦: HIDE 按钮不再隐藏 FVG 按钮 / FVG 矩形 / FVG 标签. FVG 显示状态仅由 FVG 按钮独立控制. FVG 作为独立辅助图层 (类似 FLAW_ 波段线的设计意图)"
+#property description "v1.60 F 状态矩形止于填补 K 线: 新增 FVGRecord.fillTime 记录填补那根 K 线起点. 绘制时 U/P 用 lastBarTime (延伸至最新 K 线), F 用 fillTime (止于填补 K 线起点, 不再延伸至最新 K 线). 标签位置跟随矩形右边界同步调整"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -217,6 +218,7 @@ struct FVGRecord
    int      dir;      // DIR_UP 看涨, DIR_DOWN 看跌
    int      tfMin;    // 周期分钟数 (高级别叠加时区分周期显示)
    double   fillLevel; // v1.57: 部分填补时, 价格进入缺口的最深处 (DIR_UP=最低低, DIR_DOWN=最高高); status=0 时无意义
+   datetime fillTime;  // v1.60: 完全填补时记录填补那根 K 线的起点时间 (status=2 有效; 其他=0). 用于让 F 矩形止于填补 K 线起点, 不再延伸至最新 K 线
   };
 FVGRecord g_fvgCache[];
 
@@ -1178,6 +1180,7 @@ void DetectFVG(ENUM_TIMEFRAMES tf, int firstBarShift, int lastBarShift, FVGRecor
       arr[idx].dir      = dir;
       arr[idx].tfMin    = TFToMinutes(tf);
       arr[idx].fillLevel = 0.0;    // v1.57: 部分填补时记录最深入位置
+      arr[idx].fillTime  = 0;      // v1.60: F 状态时记录填补 K 线起点; 初始=0 (未填补/部分填补时无意义)
      }
   }
 
@@ -1205,12 +1208,14 @@ void ClassifyFVGStatus(FVGRecord &rec, ENUM_TIMEFRAMES tf)
       //   看跌 FVG (DIR_DOWN): 反弹填补, 价格从下往上穿 → 只要 high 触及/突破上沿(bot) 即完全填补
       if(rec.dir == DIR_UP && l <= rec.top)
         {
-         rec.status = 2;
+         rec.status  = 2;
+         rec.fillTime = iTime(_Symbol, tf, i);   // v1.60: 记录填补那根 K 线的起点 — 矩形止于此
          return;
         }
       if(rec.dir == DIR_DOWN && h >= rec.bot)
         {
-         rec.status = 2;
+         rec.status  = 2;
+         rec.fillTime = iTime(_Symbol, tf, i);   // v1.60
          return;
         }
       // 部分填补: K 线与区间有重叠 (方向无关, high>=下沿 且 low<=上沿)
@@ -1345,9 +1350,16 @@ void UpdateFVGDisplay()
       // 矩形
       if(show)
         {
+         // v1.60: 矩形右边界按状态分支
+         //   U (未填补) / P (部分填补) → X2 = lastBarTime (延伸至最新 K 线起点, 缺口当前仍存在)
+         //   F (完全填补)               → X2 = fillTime  (止于填补那根 K 线起点, 不再延伸)
+         //   fillTime 为 0 时 (极端) fallback 到 lastBarTime
+         datetime rectEndTime = (all[i].status == 2 && all[i].fillTime > 0)
+                                ? all[i].fillTime
+                                : lastBarTime;
          if(ObjectFind(0, rectName) < 0)
            {
-            ObjectCreate(0, rectName, OBJ_RECTANGLE, 0, all[i].formTime, all[i].top, lastBarTime, all[i].bot);
+            ObjectCreate(0, rectName, OBJ_RECTANGLE, 0, all[i].formTime, all[i].top, rectEndTime, all[i].bot);
             ObjectSetInteger(0, rectName, OBJPROP_BACK, true);     // 背景层, 不挡价格线
             ObjectSetInteger(0, rectName, OBJPROP_FILL, true);     // 填充
             ObjectSetInteger(0, rectName, OBJPROP_SELECTABLE, false);
@@ -1371,7 +1383,7 @@ void UpdateFVGDisplay()
                drawTop = all[i].fillLevel;    // 顶边压到 fillLevel, 下方为未填补
            }
          ObjectMove(0, rectName, 0, all[i].formTime, drawTop);   // 角点 0: FVG 形成时刻 + 顶
-         ObjectMove(0, rectName, 1, lastBarTime,    drawBot);   // 角点 1: 最新K线起点 + 底
+         ObjectMove(0, rectName, 1, rectEndTime,    drawBot);   // 角点 1: 状态相关终点 (U/P=lastBarTime; F=fillTime) + 底
          ObjectSetInteger(0, rectName, OBJPROP_COLOR,   FVGStatusColor     (all[i].status, all[i].dir));
          ObjectSetInteger(0, rectName, OBJPROP_HIDDEN, false);
         }
@@ -1395,9 +1407,10 @@ void UpdateFVGDisplay()
             ObjectSetInteger(0, lblName, OBJPROP_ANCHOR,    ANCHOR_RIGHT_UPPER);
             ObjectSetInteger(0, lblName, OBJPROP_CORNER,    CORNER_LEFT_UPPER);
            }
-         // 计算标签目标屏幕位置: 跟随 FVG 顶边的"当前K线起点"时间
+         // 计算标签目标屏幕位置: 跟随 FVG 顶边的"矩形右边界"时间
+         // v1.60: 改用 rectEndTime — U/P 状态 = lastBarTime (与矩形右边界对齐), F 状态 = fillTime (矩形右边界已止于填补 K 线起点)
          int px = 0, py = 0;
-         if(ChartTimePriceToXY(0, 0, lastBarTime, all[i].top, px, py))
+         if(ChartTimePriceToXY(0, 0, rectEndTime, all[i].top, px, py))
            {
             // 标签宽约 36 px (字符宽 7 × 5 字符), 右上对齐后让标签左边缘紧贴矩形右上角
             int tagW = 36;

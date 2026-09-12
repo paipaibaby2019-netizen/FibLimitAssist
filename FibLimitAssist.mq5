@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.55"
-#property description "半自动斐波那契限价下单辅助 (v1.55)"
+#property version   "1.56"
+#property description "半自动斐波那契限价下单辅助 (v1.56)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45 新增 FVG 矩形: U未填补(绿/红,默认开) + P部分填补(蓝/橙,默认开) + F完全填补(灰,默认关)"
@@ -17,6 +17,7 @@
 #property description "v1.53 FVG 半透明填充: ARGB alpha 在部分 MT5 build 上不生效, 改用同色系浅色调做填充 (边框深、填充浅), 兼容所有版本"
 #property description "v1.54 FVG 填充修复: OBJPROP_BGCOLOR 对 OBJ_RECTANGLE 无效 (填充色由 OBJPROP_COLOR 控制), 删除 BGCOLOR 调用, 直接用浅色调 COLOR"
 #property description "v1.55 波段画线总开关默认改为关 (InpWaveLineEnabled=false), 开箱不画波段线, 需用户手动开启"
+#property description "v1.56 FVG 修复: ClassifyFVGStatus 完全填补条件改为方向相关. 看涨FVG需low<=top(回落穿下沿), 看跌FVG需high>=bot(反弹穿上沿). 原条件(h>=bot && l<=top)对看跌FVG永不成立, 永远卡在部分填补"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)

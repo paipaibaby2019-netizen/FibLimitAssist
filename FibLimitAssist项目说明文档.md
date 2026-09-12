@@ -454,5 +454,6 @@ Range = |price_1.00 − price_0.00|
 | 1.53 | 2026-09-12 | **FVG 半透明填充方案**：ARGB alpha（`C'48,r,g,b'`）在部分 MT5 build 上对 `OBJPROP_BGCOLOR` 不生效，改用同色系浅色调做填充（边框深、填充浅）。 |
 | 1.54 | 2026-09-12 | **FVG 填充色修复**：根因——`OBJPROP_BGCOLOR` 对 `OBJ_RECTANGLE` **无效**（MT5 的矩形对象填充色由 `OBJPROP_COLOR` 控制，BGCOLOR 是给按钮/编辑框用的）。之前设的 BGCOLOR 被矩形完全忽略，填充色还是跟边框同色（深色）。修复：删除 `FVGStatusFillColor` 函数与 BGCOLOR 调用，`FVGStatusColor` 直接返回浅色调（`_F` 后缀宏），矩形整体变浅不挡价格线。 |
 | 1.55 | 2026-09-12 | **波段画线总开关默认改为关**：`InpWaveLineEnabled` 默认值 `true` → `false`。开箱体验改为"不画波段线"，需用户手动在参数里开启。与信号提醒（`InpSignalEnabled` 默认关）对齐——辅助功能默认不干扰主图。 |
+| 1.56 | 2026-09-12 | **FVG 完全填补条件方向相关修复**：`ClassifyFVGStatus` 的完全填补条件原本是 `h >= rec.bot && l <= rec.top`（K 线同时覆盖上下沿），但**对看跌 FVG 永远不成立**——价格反弹填补时，K 线整体在区间上方，`low` 永远 > `top`，所以看跌 FVG 一旦被部分填补就**永远卡在 P 状态**，无法升到 F。修复：完全填补改为方向相关——看涨 FVG（DIR_UP）需 `l <= rec.top`（回落穿下沿），看跌 FVG（DIR_DOWN）需 `h >= rec.bot`（反弹穿上沿）。 |
 
 > **版本缺口已回补**：v1.10~v1.44 已全部同步至本文档。其中 v1.10/v1.11/v1.12/v1.14 在 git 中无独立提交（本地迭代后随 v1.13 一次性推送，或被后续版本号跳号），内容以代码注释标注为准。

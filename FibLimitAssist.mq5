@@ -12,7 +12,7 @@
 #property description "FVG 完全独立于 HIDE; F 状态矩形止于填补 K 线起点; 部分填补只画剩余未填补 (v1.57)"
 #property description "v1.40+ 信号提醒: 强弱回调/反弹形态评分 + Alert推送 + 波段画线(独立于信号,InpWaveLineEnabled)"
 #property description "v1.50-v1.59 修复详情见项目说明文档第 13 章 (描述符总数受限, 变更记录仅保留概要)"
-#property description "v1.61 顶部按钮左对齐链: LONG/ADJUST/CANCEL 改为左对齐 (类似底部 HIDE/RISK/FVG 链), LONG 在 STEP 列右 8px 起, 每个按钮间 4px 间距. 原居中布局让顶部右侧留白过大, 与底部左列无视觉对齐"
+#property description "v1.61 顶部按钮左对齐链: LONG→ADJUST→CANCEL 类似底部 HIDE→RISK→FVG 链, stepBox+8/92/176 递进"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -590,6 +590,19 @@ void UpdateLabelRight(string name, double price, string text)
    ObjectSetString(0, name, OBJPROP_TEXT, text);
   }
 
+//+------------------------------------------------------------------+
+//| v1.17: STEP UP/DOWN 按钮 (1.00/0.00/0.79/0.49 各一对)
+//| 单击 = 移动区间比例 InpStepPercent%, 双击 300ms 内 = ×10
+//+------------------------------------------------------------------+
+// v1.61: STEP 几何宏提前到这里 — 原定义在 UpdateSwapButton/UpdateAdjustButton 之后,
+//   但这两个函数 (顶部按钮布局重构后) 也引用了这些宏, MQL5 按文件顺序解析 #define
+//   (不像 C 预处理器全单元展开), 前置引用会报 undeclared identifier
+#define STEP_BTN_W     22   // 按钮宽度
+#define STEP_BTN_H     18   // 按钮高度
+#define STEP_BTN_GAP   2    // UP/DOWN 之间的间距
+#define STEP_BTN_X     6    // 距图表左边距
+#define STEP_BTN_DN_OFFSET (STEP_BTN_W + STEP_BTN_GAP)
+
 void UpdateSwapButton(int dir)
   {
    string name = SwapName();
@@ -634,11 +647,7 @@ void UpdateAdjustButton()
 //| v1.17: STEP UP/DOWN 按钮 (1.00/0.00/0.79/0.49 各一对)
 //| 单击 = 移动区间比例 InpStepPercent%, 双击 300ms 内 = ×10
 //+------------------------------------------------------------------+
-#define STEP_BTN_W     22   // 按钮宽度
-#define STEP_BTN_H     18   // 按钮高度
-#define STEP_BTN_GAP   2    // UP/DOWN 之间的间距
-#define STEP_BTN_X     6    // 距图表左边距
-#define STEP_BTN_DN_OFFSET (STEP_BTN_W + STEP_BTN_GAP)
+// v1.61: STEP 几何宏已上移到 UpdateSwapButton 之前 (line 600-604), 详见那里的注释
 
 bool CreateStepButton(double ratio, int dir)
   {

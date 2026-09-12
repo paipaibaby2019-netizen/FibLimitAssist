@@ -4,7 +4,7 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.47"
+#property version   "1.48"
 #property description "半自动斐波那契限价下单辅助 (v1.46)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
@@ -1026,13 +1026,22 @@ void UpdateStopButton(int dir)
   }
 
 // v1.45: FVG 按钮文字 + 颜色 + sticky 状态 (与 HIDE 同模式: 开=文字"FVG"+浅灰+弹起, 关=文字"OFF"+橙黄+按下)
+// v1.48: 自愈 — 按钮若不存在 (v1.45/1.46/1.47 旧版本误删过), 自动重建
 void UpdateFVGButton()
   {
    string name = FVGButtonName();
-   if(ObjectFind(0, name) < 0) return;
+   if(ObjectFind(0, name) < 0)
+     {
+      CreateActionButton(name, 80, "FVG", CLR_FVG_OFF,
+                         "切换 FVG 矩形显示 (公允价值缺口): OFF=隐藏, FVG=显示 (按当前方向颜色 + 未/部分/完全填补状态)");
+      if(ObjectFind(0, name) < 0) return;
+     }
    ObjectSetString(0, name, OBJPROP_TEXT, g_fvgEnabled ? "FVG" : "OFF");
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, g_fvgEnabled ? CLR_FVG_OFF : CLR_FVG_ON);
    ObjectSetInteger(0, name, OBJPROP_STATE, !g_fvgEnabled);  // sticky: 按下=当前关闭
+   // v1.48: 隐藏态下也保持按钮在屏幕可见 (按 HIDE 同款语义)
+   if(g_hidden) ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   else         ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
   }
 
 // v1.45: ENUM_TIMEFRAMES → 分钟数 (用于 FVG 标签时间显示, 不支持范围返回 0)
@@ -1224,12 +1233,15 @@ void UpdateFVGDisplay()
   {
    if(!g_fvgEnabled || g_hidden)
      {
-      // 关闭或全局隐藏 → 清掉所有 FVG 矩形 (含标签)
+      // v1.48: 关闭或全局隐藏 → 仅清掉 FVG 矩形 (FVG_R_*) + 状态标签 (FVG_L_*)
+      //   不能用 FVG_ 前缀过滤, 因为 FVG_BTN 按钮也是 FVG_ 前缀, 误删按钮 → "点一次消失" bug
+      //   必须精确匹配 FVG_R_ / FVG_L_
       int total = ObjectsTotal(0, -1, -1);
       for(int i = total - 1; i >= 0; i--)
         {
          string nm = ObjectName(0, i, -1, -1);
-         if(StringFind(nm, FVGPrefix()) == 0)
+         if(StringFind(nm, FVGPrefix() + "R_") == 0
+         || StringFind(nm, FVGPrefix() + "L_") == 0)
             ObjectDelete(0, nm);
         }
       return;

@@ -4,14 +4,15 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.60"
-#property description "半自动斐波那契限价下单辅助 (v1.60)"
+#property version   "1.61"
+#property description "半自动斐波那契限价下单辅助 (v1.61)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
 #property description "FVG 完全独立于 HIDE; F 状态矩形止于填补 K 线起点; 部分填补只画剩余未填补 (v1.57)"
 #property description "v1.40+ 信号提醒: 强弱回调/反弹形态评分 + Alert推送 + 波段画线(独立于信号,InpWaveLineEnabled)"
 #property description "v1.50-v1.59 修复详情见项目说明文档第 13 章 (描述符总数受限, 变更记录仅保留概要)"
+#property description "v1.61 顶部按钮左对齐链: LONG/ADJUST/CANCEL 改为左对齐 (类似底部 HIDE/RISK/FVG 链), LONG 在 STEP 列右 8px 起, 每个按钮间 4px 间距. 原居中布局让顶部右侧留白过大, 与底部左列无视觉对齐"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -598,28 +599,34 @@ void UpdateSwapButton(int dir)
    color bg = (dir == DIR_UP) ? CLR_BUY_BG : ((dir == DIR_DOWN) ? CLR_SELL_BG : CLR_FLAT_BG);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
 
-   // v1.08b：水平居中 + 垂直放到最上面那根线（MathMax(p1,p0)）下方 4px
-   // v1.26: 由 y-11 (线穿过按钮) 改为 y+4 (按钮位于线下方, 不被线穿过)
+   // v1.61: 顶部按钮布局重构 — 改为左对齐链 (类似底部 HIDE/RISK/FVG 链)
+   //   LONG   X = stepBox + 8          (STEP 列右 8px, 类 HIDE 位置)
+   //   ADJUST X = xLong  + UI(80) + 4  (类 RISK)
+   //   CANCEL X = xAdj  + UI(80) + 4   (类 FVG)
+   //   原居中布局 (SWAP = (w-80)/2) 让顶部右侧留白过大, 且与底部左列无视觉对齐
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
    int x = 0, y = 0;
    double topPrice = MathMax(g_p1, g_p0);
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - UI(80)) / 2);
+   int stepBox = UI(STEP_BTN_X) + (UI(STEP_BTN_W) + UI(STEP_BTN_GAP)) + UI(STEP_BTN_W);
+   int xLong   = stepBox + UI(8);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, xLong);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y + UI(4));
   }
 
 // v1.13: ADJUST 按钮位置 (在 SWAP 右侧 4px)
 // v1.26: Y 改 y+4 (SWAP/ADJUST/CANCEL 三个按钮统一在 topPrice 线下方 4px, 不被线穿过)
+// v1.61: 跟随 LONG 右侧 4px (改为左对齐链, xAdjust = xLong + 84)
 void UpdateAdjustButton()
   {
    string name = AdjustName();
    if(ObjectFind(0, name) < 0) return;
-   int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
    int x = 0, y = 0;
    double topPrice = MathMax(g_p1, g_p0);
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
-   // SWAP 位置 = (w-UI(80))/2, ADJUST 宽 UI(80), 间距 UI(4) → ADJUST 左 X = SWAP 左 X + SWAP 宽 + 间距
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (w - UI(80)) / 2 + UI(84));
+   int stepBox  = UI(STEP_BTN_X) + (UI(STEP_BTN_W) + UI(STEP_BTN_GAP)) + UI(STEP_BTN_W);
+   int xAdjust  = stepBox + UI(8) + UI(80) + UI(4);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, xAdjust);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y + UI(4));
   }
 
@@ -860,7 +867,7 @@ void ApplyStepDrag(double r, double price)
    RefreshAll();
   }
 
-// 最上面那根线右侧：CANCEL 按钮
+// 顶部按钮 — v1.61: 改为左对齐链 (LONG → ADJUST → CANCEL), LONG/ADJUST 由各自函数定位, 这里只设 CANCEL
 // v1.26: 改到线下方 (y+4), 与 SWAP/ADJUST 三个按钮统一在 topPrice 线下方 4px, 不被线穿过
 void UpdateTopButtons()
   {
@@ -869,11 +876,14 @@ void UpdateTopButtons()
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
    int yBtn = y + UI(4);
 
+   // v1.61: CANCEL X = stepBox + 8 + 80 + 4 + 80 + 4 = stepBox + 176 (ADJUST 右侧相邻 4px)
+   //   原右对齐 (g_btnX) 已废弃 — 顶部按钮全部左对齐
+   int stepBox = UI(STEP_BTN_X) + (UI(STEP_BTN_W) + UI(STEP_BTN_GAP)) + UI(STEP_BTN_W);
+   int xCancel = stepBox + UI(8) + UI(80) + UI(4) + UI(80) + UI(4);
    string cancelName = CancelPendingName();
    if(ObjectFind(0, cancelName) >= 0)
      {
-      // v1.08：CANCEL 左 X = g_btnX（右边距 8px，宽 100），原表达式 g_btnX+200-100 等价
-      ObjectSetInteger(0, cancelName, OBJPROP_XDISTANCE, g_btnX);
+      ObjectSetInteger(0, cancelName, OBJPROP_XDISTANCE, xCancel);
       ObjectSetInteger(0, cancelName, OBJPROP_YDISTANCE, yBtn);
      }
   }

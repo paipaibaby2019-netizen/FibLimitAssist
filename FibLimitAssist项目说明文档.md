@@ -79,15 +79,17 @@ price_r = price_1.00 + (1 - r) × (price_0.00 - price_1.00)
 
 > ⚠️ **规格歧义说明**：原始 `readme.txt` 中「对象权限」第 2 条写作 `0.00、0.21：仅绘图，不可拖拽`，与第 1 条（`1.00、0.00` 可拖拽）及「初始化流程」（拖拽 1.00 起点、**0.00 终点**定义区间）矛盾。本实现按 **`0.00` 为可拖拽端点、`0.21` 仅绘图** 解读（第 2 条的 `0.00` 视为笔误）。如需改为「0.00 不可拖拽」，请明确告知。
 
-> **多空切换按钮**（SWAP，v1.26 位置改）：**水平居中 + 垂直放在最上面那根线（`MathMax(price_1.00, price_0.00)`）下方 4px**（不再被线穿过）。点击后对调 `1.00`（起点）与 `0.00`（终点），方向自动翻转，`0.79`/`0.49` 回归理论比例。按钮文字实时显示当前方向（`LONG` / `SHORT` / `FLAT`），底色随方向变化（绿 / 红 / 灰）。**点击后立即自动回弹**（不再 sticky）。
+> **多空切换按钮**（SWAP，v1.26 位置改 / v1.61 改为左对齐）：**水平方向改为左对齐链**——`x = stepBox + 8`（`stepBox` = STEP 按钮列右边缘，即与底部 HIDE 按钮同 X），**垂直放在最上面那根线（`MathMax(price_1.00, price_0.00)`）下方 4px**（不再被线穿过）。点击后对调 `1.00`（起点）与 `0.00`（终点），方向自动翻转，`0.79`/`0.49` 回归理论比例。按钮文字实时显示当前方向（`LONG` / `SHORT` / `FLAT`），底色随方向变化（绿 / 红 / 灰）。**点击后立即自动回弹**（不再 sticky）。v1.61 改左对齐的原因：原居中布局让顶部右侧留白过大，与底部 `HIDE/RISK/FVG` 左列无视觉对齐。
 >
-> **ADJUST 一键调整按钮**（v1.13 新增）：位于 SWAP 右侧 4px，与 SWAP/CANCEL 同在最上面线下方 4px（v1.26）。点击后把 `1.00`/`0.00` 自动调整到图表上**最近的高低点**（移植 zigzag 分形识别，参数见第 10 章），`0.79`/`0.49` 回归理论比例。适合快速对齐当前 swing 区间。
+> **ADJUST 一键调整按钮**（v1.13 新增 / v1.61 跟随 LONG）：水平方向 `x = stepBox + 8 + 80 + 4 = stepBox + 92`，即 LONG 右侧 4px（与底部 RISK 跟随 HIDE 同款模式），垂直同样在线下方 4px。点击后把 `1.00`/`0.00` 自动调整到图表上**最近的高低点**（移植 zigzag 分形识别，参数见第 10 章），`0.79`/`0.49` 回归理论比例。适合快速对齐当前 swing 区间。
+>
+> **CANCEL 取消挂单按钮**（v1.61 改为跟随 ADJUST）：水平方向 `x = stepBox + 8 + 80 + 4 + 80 + 4 = stepBox + 176`，即 ADJUST 右侧 4px（与底部 FVG 跟随 RISK 同款模式）。原右对齐（`g_btnX = w - 108`）已废弃，顶部三个按钮全部左对齐形成"LONG → ADJUST → CANCEL"链，与底部"HIDE → RISK → FVG"链视觉对齐。
 
 ### 3.4 一键清场/保本按钮
 
 | 按钮 | 文字 | 位置 | 作用 |
 |------|------|------|------|
-| 取消挂单 | `CANCEL` | 最上面那根线的**下方 4px** 的右端（与 0.79/0.49 按钮右对齐；v1.26 与 SWAP/ADJUST 统一到线下方） | 一键取消**当前图表品种**的全部挂单（不限魔术号，含手动挂的 LIMIT/STOP/STOP_LIMIT；不含其他品种的挂单） |
+| 取消挂单 | `CANCEL` | 最上面那根线的**下方 4px**，**ADJUST 右侧 4px**（v1.61 改为左对齐链第三环，原右对齐 `g_btnX` 废弃） | 一键取消**当前图表品种**的全部挂单（不限魔术号，含手动挂的 LIMIT/STOP/STOP_LIMIT；不含其他品种的挂单） |
 | 一键保本（v1.08 新增） | `EVEN` | 最下面那根线的上方，`CHALF` 左侧（v1.25 起与 CHALF/CALL 等距 4px） | 遍历**当前图表品种**的全部持仓：**盈利仓位的 SL 改到入场价**（锁住利润，标准 breakeven）；**亏损仓位的 TP 改到入场价**（价格回到入场即保本离场）。已是入场价的自动跳过。 |
 | 平一半 | `CHALF`（v1.08 由 CLOSE HALF 改名） | 最下面那根线的上方，**`CALL` 左侧**（v1.25 起等距 4px） | 按手数砍半平掉**当前图表品种**的全部持仓；砍半后 < 品种最小手数则**全平该仓位** |
 | 清仓 | `CALL`（v1.08 由 CLOSE ALL 改名） | 最下面那根线的上方（与 0.79/0.49 按钮右对齐） | 一键平掉**当前图表品种**的全部持仓，**不涉及挂单** |
@@ -460,5 +462,7 @@ Range = |price_1.00 − price_0.00|
 | 1.58 | 2026-09-12 | **FVG 配色简化**：由 6 色（U绿/U红/P蓝/P橙/F灰 × 边框填充）简化为 3 色（看涨浅绿 / 看跌浅红 / 填补浅灰），不再区分未填补（U）与部分填补（P），只按方向（上涨/下跌）着色。`FVGStatusColor` 仅判断 `dir` + 是否 Filled，逻辑收敛。 |
 | 1.59 | 2026-09-12 | **FVG 与 HIDE 完全解耦**：HIDE 按钮不再隐藏 FVG 按钮 / FVG 矩形 / FVG 标签，FVG 显示状态仅由独立的 FVG 按钮控制。改动：① `ApplyHidden` 跳过 `FVG_BTN` 按钮 + `FVG_R_*` 矩形 + `FVG_L_*` 标签（HIDE 不再碰它们）；② `UpdateFVGDisplay` 入口条件由 `(!g_fvgEnabled \|\| g_hidden)` 改为 `(!g_fvgEnabled)`，HIDE 时 FVG 矩形不被删除；③ `UpdateFVGButton` 删除跟随 `g_hidden` 切换 `OBJPROP_HIDDEN` 的两行代码。设计意图：FVG 是"独立于主 fib UI 的辅助图层"，类似 `FLAW_` 波段线的设计——HIDE 只影响斐波那契画线与挂单/仓位按钮，不应波及辅助图层。 |
 | 1.60 | 2026-09-12 | **F 状态矩形止于填补 K 线**：之前 F（完全填补）矩形的 X2 也用 `lastBarTime`，延伸到最新 K 线，与"已填补不再存在"的语义冲突。修复：① `FVGRecord` 新增 `fillTime` 字段（`DetectFVG` 初始化为 0）；② `ClassifyFVGStatus` 在 F 状态判定时记录 `fillTime = iTime(_, _, i)`（填补那根 K 线的起点）；③ `UpdateFVGDisplay` 绘制时引入局部变量 `rectEndTime`——U/P 用 `lastBarTime`（延伸至最新 K 线）、F 用 `fillTime`（止于填补 K 线起点）；④ 右上角状态标签的 X 锚点时间也同步改为 `rectEndTime`，与矩形右边界对齐。`fillTime == 0` 时 fallback 到 `lastBarTime`（防御性兜底，正常流程下 `iTime` 不会为 0）。 |
+| 1.60 fix | 2026-09-12 | **rectEndTime 作用域 + description 精简**：① v1.60 `rectEndTime` 编译错误修复——原在 `if(show)` 块内声明，但下方 `if(showLbl)` 块也用到，作用域不重叠。提升到 `for` 循环顶部声明；② `#property description too long` × 9 警告修复——MT5 内部对 description 总字符数有限制（约 1024 字节），17 条 description 累计 1551 字符导致从某行起报"too long"。精简到 7 条，累计 405 字符，v1.50-v1.59 的变更记录合并为"详见项目说明文档第 13 章"单行。 |
+| 1.61 | 2026-09-12 | **顶部按钮布局重构 — 左对齐链**：原 LONG (SWAP) 居中 `(w-80)/2`，ADJUST 跟随 LONG 右侧 4px，CANCEL 右对齐 `g_btnX = w-108`——顶部右侧留白过大、与底部 HIDE/RISK/FVG 左列无视觉对齐。重构后顶部三个按钮全部左对齐形成"LONG → ADJUST → CANCEL"链，与底部"HIDE → RISK → FVG"链视觉对齐。改动：① `UpdateSwapButton` X = `stepBox + 8`（STEP 列右 8px，类 HIDE 位置）；② `UpdateAdjustButton` X = `stepBox + 92`（LONG 右侧 4px，类 RISK 跟随 HIDE 模式）；③ `UpdateTopButtons` 中 CANCEL X = `stepBox + 176`（ADJUST 右侧 4px，类 FVG 跟随 RISK 模式），原 `g_btnX` 用法废弃。三个函数各自计算 `stepBox`（少量重复，换 RefreshAll 调用顺序无关性）。 |
 
 > **版本缺口已回补**：v1.10~v1.44 已全部同步至本文档。其中 v1.10/v1.11/v1.12/v1.14 在 git 中无独立提交（本地迭代后随 v1.13 一次性推送，或被后续版本号跳号），内容以代码注释标注为准。

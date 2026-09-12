@@ -1134,6 +1134,11 @@ void DetectFVG(ENUM_TIMEFRAMES tf, int firstBarShift, int lastBarShift, FVGRecor
       double midLow  = iLow (_Symbol, tf, i);
       double c3High  = iHigh(_Symbol, tf, i - 1);
       double c3Low   = iLow (_Symbol, tf, i - 1);
+      // v1.51 调试: 打印第一个已收盘组合 (i=3 → C1=4 Mid=3 C3=2, 全已收线)
+      if(i == 3)
+         PrintFormat("FVG_DEB[%s] i=3 C1=(%.5f,%.5f) Mid=(%.5f,%.5f) C3=(%.5f,%.5f) c1High<c3Low=%d c1Low>c3High=%d",
+                     _Symbol, c1Low, c1High, midLow, midHigh, c3Low, c3High,
+                     (int)(c1High < c3Low), (int)(c1Low > c3High));
       if(c1High <= 0 || c1Low <= 0 || midHigh <= 0 || midLow <= 0 || c3High <= 0 || c3Low <= 0)
          continue;
       datetime c1Time = iTime(_Symbol, tf, i + 1);

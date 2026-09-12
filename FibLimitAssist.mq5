@@ -4,32 +4,13 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.45"
-#property description "半自动斐波那契限价下单辅助："
-#property description "· 人工拖拽 1.00 起点 / 0.00 终点定义高低区间"
-#property description "· 点击 0.79 / 0.49 右侧按钮下发 ORDER_LIMIT 限价单"
-#property description "· 单笔风险 = 余额固定百分比，盈亏比固定，手数反算并截断"
-#property description "· MKT 按钮两侧实时显示持仓浮盈 + 当日累计盈亏"
-#property description "· EVEN 按钮统一把任意持仓调到入场价平仓（盈改 SL，亏改 TP）"
-#property description "· ADJUST 按钮一键把 1.00/0.00 调整到图表最近的高低点 (v1.13)"
-#property description "· 1.00/0.79/0.49/0.00 各一对 STEP 按钮微调单线, 双击=×10 加速 (v1.17, v1.24 浅灰配色)"
-#property description "· HIDE 按钮改浅灰底 (与 CANCEL 同色, v1.25); EVEN/CHALF/CALL 等距 4px (v1.25); 0.79/0.49 线随方向变色 (long 绿/short 红, v1.25)"
-#property description "· SWAP/ADJUST/CANCEL 三个按钮统一放最上面线下方 4px (v1.26, 不再被线穿过)"
-#property description "· UI 缩放拆尺寸/字号: InpUIScale 缩按钮, InpFontScale 缩字号 (v1.28)"
-#property description "· v1.29 修复 Wine 误判: 平台检测改用 Z 盘/便携模式特征, mac(Wine) 不再被误当 Windows 缩放"
-#property description "· v1.30 STEP 按钮调整端点 (1.00/0.00) 时, 中间线 0.79/0.49 也按比例跟随 (与鼠标拖动端点行为一致)"
-#property description "· v1.31 新增 BUY/SELL STOP 突破挂单按钮 (MKT 右侧): long 挂 top+1tick, short 挂 bot-1tick, SL/TP/lot 与 MKT 一致"
-#property description "· v1.32 STOP/MKT 关于底线镜像对称; STOP 不再抢占 g_btnX (恢复右链按钮对齐)"
-#property description "· v1.33 按钮文字缩短: BUY STOP→BUY STP, SELL STOP→SELL STP"
-#property description "· v1.35 盈亏比标签接入 OnTick 平时分支, 每 tick 实时刷新"
-#property description "· v1.36 端点位置按周期记忆 (GlobalVariableTemp 临时变量, 重启清空)"
-#property description "· v1.39 移除 kernel32.dll 依赖, 改用纯路径判断 Wine (无需勾选 Allow DLL imports)"
-#property description "· v1.45 新增 FVG 矩形画图 (公允价值缺口): U未填补(绿/红) + P部分填补(蓝/橙) + F完全填补(灰,默认关); 仅扫可见区, 可选叠加 1 个高级别, 每 tick 实时重判"
-#property description "· v1.40 新增交易信号提醒: 强势上涨→弱势回调/强势下跌→弱势反弹 形态识别 + 5维评分 + Alert + 手机推送, 总开关默认关"
-#property description "· v1.41 修复 v1.40 编译错误: iATR() 返回 handle 需 CopyBuffer 取 ATR 值 (此前误作数值 4 参数调用导致 wrong parameters count)"
-#property description "· v1.42 修复 HIDE 后线条不停闪现: RefreshAll 隐藏态早退, 跳过写回可见位置的定位函数"
-#property description "· v1.43 信号波段画线: 检测到的最新波段高低点用趋势线连接 (上涨绿/下跌红), 独立前缀不受 HIDE 影响; 锚点用绝对时间+价格, 与图表周期无关"
-#property description "· v1.44 画线与信号触发完全解耦: 画线只看波段定义(有效分型对+幅度门槛), 不依赖触达/失效/评分; 新增 InpWaveLineEnabled 独立开关, 与 InpSignalEnabled 完全分离"
+#property version   "1.46"
+#property description "半自动斐波那契限价下单辅助 (v1.46)"
+#property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
+#property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
+#property description "v1.45 新增 FVG 矩形: U未填补(绿/红,默认开) + P部分填补(蓝/橙,默认开) + F完全填补(灰,默认关)"
+#property description "FVG 选项: 仅可见区扫描 + 高级别叠加(按当前周期自动映射) + 最小宽度过滤 + 每 tick 实时重判"
+#property description "v1.40+ 信号提醒: 强弱回调/反弹形态评分 + Alert推送 + 波段画线(独立于信号,InpWaveLineEnabled)"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -1216,10 +1197,10 @@ void ClassifyFVGStatus(FVGRecord &rec, ENUM_TIMEFRAMES tf)
 string TFShortStr(int minutes)
   {
    if(minutes <= 0)     return "?";
-   if(minutes < 60)     return minutes + "m";
-   if(minutes < 1440)   return (minutes / 60) + "h";
-   if(minutes < 10080)  return (minutes / 1440) + "d";
-   return (minutes / 10080) + "w";
+   if(minutes < 60)     return IntegerToString(minutes) + "m";
+   if(minutes < 1440)   return IntegerToString(minutes / 60) + "h";
+   if(minutes < 10080)  return IntegerToString(minutes / 1440) + "d";
+   return IntegerToString(minutes / 10080) + "w";
   }
 
 // v1.45: FVG 矩形名 (按 formTime 唯一标识 — 同一时间点只可能有一个 FVG)
@@ -1325,18 +1306,18 @@ void UpdateFVGDisplay()
             // 虚线用于"未成熟" (中间 K 线 shift=0): formTime 严格等于 iTime(_,_,0) — 但 DetectFVG 已排除 shift<0, 不存在
             // 此处全部用实线 (未成熟 K 线不可能形成有效 FVG, 因为 iHigh/iLow 返回当前实时值不稳定)
            }
-         ObjectSetInteger(0, rectName, OBJPROP_TIME1, all[i].formTime);
-         ObjectSetInteger(0, rectName, OBJPROP_TIME2, lastBarTime);
-         ObjectSetInteger(0, rectName, OBJPROP_PRICE1, all[i].top);
-         ObjectSetInteger(0, rectName, OBJPROP_PRICE2, all[i].bot);
-         ObjectSetInteger(0, rectName, OBJPROP_COLOR, FVGStatusColor(all[i].status, all[i].dir));
+         ObjectSetDouble (0, rectName, OBJPROP_TIME1,  (double)all[i].formTime);
+         ObjectSetDouble (0, rectName, OBJPROP_TIME2,  (double)lastBarTime);
+         ObjectSetDouble (0, rectName, OBJPROP_PRICE1, all[i].top);
+         ObjectSetDouble (0, rectName, OBJPROP_PRICE2, all[i].bot);
+         ObjectSetInteger(0, rectName, OBJPROP_COLOR,  FVGStatusColor(all[i].status, all[i].dir));
          ObjectSetInteger(0, rectName, OBJPROP_HIDDEN, false);
         }
       else if(ObjectFind(0, rectName) >= 0)
          ObjectDelete(0, rectName);
 
       // 右上角小标签
-      bool showLbl = show && (ObjectGetInteger(0, ChartID(), CHART_WIDTH_IN_PIXELS, 0) > 200);
+      bool showLbl = show && (ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0) > 200);
       if(showLbl)
         {
          string tfStr = TFShortStr(all[i].tfMin);
@@ -1352,7 +1333,7 @@ void UpdateFVGDisplay()
          ObjectSetString (0, lblName, OBJPROP_TEXT, lblText);
          ObjectSetInteger(0, lblName, OBJPROP_COLOR, FVGStatusColor(all[i].status, all[i].dir));
          ObjectSetDouble (0, lblName, OBJPROP_PRICE, all[i].top);
-         ObjectSetInteger(0, lblName, OBJPROP_TIME, lastBarTime);
+         ObjectSetDouble (0, lblName, OBJPROP_TIME,  (double)lastBarTime);
          ObjectSetInteger(0, lblName, OBJPROP_HIDDEN, false);
         }
       else if(ObjectFind(0, lblName) >= 0)

@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.83"
-#property description "半自动斐波那契限价下单辅助 (v1.83)"
+#property version   "1.84"
+#property description "半自动斐波那契限价下单辅助 (v1.84)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -22,6 +22,7 @@
 #property description "v1.81 FVG 右侧新增 FILL 按钮 (切换 status=2 填补态显隐, 默认 OFF), 与 InpFVG_ShowFilled AND 关系; 新增 g_fillShown 全局, UpdateFillButton 同步文字/颜色"
 #property description "v1.82 InpFVG_ShowFilled 默认 false→true (主开关默认开, FILL 按钮仍默认 OFF); EVEN/CHALF/CALL 从顶部第二排移到 0.49 挂单线, X 不变, Y=screenY(0.49)-UI(11) 让线穿按钮中"
 #property description "v1.83 FVG/FILL 按钮合并为单按钮 3 状态循环: FVG(只显 U/P) → FILL(再显完全填补) → OFF(全隐藏) → FVG; 删除 g_fillShown/FillButtonName/UpdateFillButton, 新增 g_fvgState 状态机 + AdvanceFVGState; FVG 与 RISK 位置对调 (新顺序 HIDE→FVG→RISK), 三按钮宽 80 与 HIDE 对齐"
+#property description "v1.84 0.79 挂单拆成两半仓: 半仓 1 TP=0.19 装饰线 (v1.80 逻辑), 半仓 2 TP=0.79→0.19 距离的 2 倍 (= 2×tp019 - entry); SL 相同, lot 各半 (总风险不变), 两笔独立挂单同 entry 触发"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -33,7 +34,7 @@
 #property description "v1.70 ADJUST 跳过已完全填补 FVG: FindMostRecentFVG_K2 在 K2 已收线后, 调 ClassifyFVGStatus 判 status; 若 status=2 (完全填补) 则 continue 试次近的, 优先选未填补/部分填补的 FVG"
 
 //---------------------------- 输入参数 -----------------------------//
-// 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79 挂单 TP=0.19 装饰线位置, 0.49 挂单=1:1, 市价=1:1)
+// 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2); 0.79 挂单 v1.84 起拆两半仓 (半仓1 TP=0.19 线, 半仓2 TP=0.79→0.19 距离的2倍), 0.49 挂单=1:1, 市价=1:1
 input double InpSL_OffsetPercent = 1.0;        // 止损向外偏移占区间百分比 (%)
 input int    InpLotDecimals      = 2;          // 手数截断保留的小数位 (不四舍五入)
 input long   InpMagicNumber      = 20260903;   // 订单魔术号
@@ -2209,6 +2210,13 @@ ENUM_ORDER_TYPE_FILLING GetFillMode() { return GetFillModeFor(_Symbol); }
 
 void SendLimitOrder(int dir, double price, double sl, double tp, double lot)
   {
+   SendLimitOrderEx(dir, price, sl, tp, lot, InpOrderComment);
+  }
+
+// v1.84: SendLimitOrder 扩展版 — 支持自定义订单注释 (用于 0.79 拆单区分 1/2 2/2)
+//   复用 SendLimitOrder 的逻辑, 仅把注释改为传入参数
+void SendLimitOrderEx(int dir, double price, double sl, double tp, double lot, string comment)
+  {
    MqlTradeRequest req;
    MqlTradeResult  res;
    ZeroMemory(req);
@@ -2225,7 +2233,7 @@ void SendLimitOrder(int dir, double price, double sl, double tp, double lot)
    req.type        = (dir == DIR_UP) ? ORDER_TYPE_BUY_LIMIT : ORDER_TYPE_SELL_LIMIT;
    req.type_filling = GetFillMode();
    req.type_time   = ORDER_TIME_GTC;   // 无过期时间
-   req.comment     = InpOrderComment;
+   req.comment     = comment;
 
    if(!OrderSend(req, res))
      {
@@ -2233,7 +2241,8 @@ void SendLimitOrder(int dir, double price, double sl, double tp, double lot)
       return;
      }
    Print("[FibLimitAssist] 挂单成功 ticket=", res.order, " ",
-         (dir == DIR_UP ? "BUY" : "SELL"), " LIMIT vol=", DoubleToString(lot, InpLotDecimals));
+         (dir == DIR_UP ? "BUY" : "SELL"), " LIMIT vol=", DoubleToString(lot, InpLotDecimals),
+         " comment=", comment);
   }
 
 void PlaceOrderWithRR(double r, double rr)
@@ -2277,7 +2286,8 @@ void PlaceOrderWithRR(double r, double rr)
   }
 
 // v1.80: 0.79 挂单 TP 改为 0.19 装饰线位置 (RATIO_019); 0.49 保持 1:1 RR
-//   历史: v1.06 起 0.79 → RR=3.0 (TP 距离 = 3 × SL 距离); v1.80 起 0.79 → TP = TheoPrice(0.19)
+// v1.84: 0.79 挂单拆成两半仓 — 半仓 1 TP=0.19 线 (v1.80 逻辑), 半仓 2 TP=0.79→0.19 距离的 2 倍
+//   历史: v1.06 起 0.79 → RR=3.0 (TP 距离 = 3 × SL 距离); v1.80 起 0.79 → TP = TheoPrice(0.19); v1.84 起 0.79 → 拆两半仓
 //   0.19 线位于 1.00/0.00 区间的另一端 (相对 0.79 远离 1.00), 因此:
 //   - LONG (1.00 在底): 0.79 入场 ≈ 下部, 0.19 在上部 → TP > entry ✓
 //   - SHORT (1.00 在顶): 0.79 入场 ≈ 上部, 0.19 在下部 → TP < entry ✓
@@ -2285,15 +2295,21 @@ void PlaceOrder(double r)
   {
    if(r == RATIO_079)
      {
-      PlaceOrderWithAbsoluteTP(r, TheoPrice(RATIO_019, g_p1, g_p0));
+      PlaceOrder079Split();
       return;
      }
    PlaceOrderWithRR(r, 1.0);
   }
 
-// v1.80: 挂单用绝对 TP 价位 (不再按 RR 倍数计算)
-//   复用 PlaceOrderWithRR 的 SL 公式 (g_p1 ± range × InpSL_OffsetPercent%), 仅把 TP 替换为传入的绝对价位
-void PlaceOrderWithAbsoluteTP(double r, double tpPrice)
+// v1.84: 0.79 挂单拆成两半仓
+//   - 两笔独立挂单, 同一 entry + 同一 SL, 不同 TP, lot 各半 (总风险 = 原来一次挂单的风险)
+//   - 半仓 1 TP = TheoPrice(RATIO_019, g_p1, g_p0)        = 0.19 装饰线位置
+//   - 半仓 2 TP = 2 * tp019 - entry                       = 0.79→0.19 距离沿同方向再延伸等距
+//   - 几何: 半仓 2 TP 远超 1.00/0.00 区间外, 让利润奔跑
+//     · LONG (g_p0>g_p1): tp2 > g_p0 (0.00 上方), 趋势延续时捕捉大波段
+//     · SHORT(g_p0<g_p1): tp2 < g_p0 (0.00 下方), 趋势延续时捕捉大波段
+//   - 注释后缀 " (1/2)" / " (2/2)" 区分两笔
+void PlaceOrder079Split()
   {
    int dir = Dir();
    if(dir == DIR_FLAT)
@@ -2302,7 +2318,9 @@ void PlaceOrderWithAbsoluteTP(double r, double tpPrice)
       return;
      }
 
-   double entry = LevelPrice(r);
+   double entry = LevelPrice(RATIO_079);
+   double tp019 = TheoPrice(RATIO_019, g_p1, g_p0);
+   double tp2   = 2.0 * tp019 - entry;   // 半仓 2 TP: 0.79→0.19 距离的 2 倍 (沿 0.79→0.19 方向延伸)
    double range = MathAbs(g_p0 - g_p1);
    double sl;
 
@@ -2319,20 +2337,47 @@ void PlaceOrderWithAbsoluteTP(double r, double tpPrice)
       if(sl <= entry) { Alert("[FibLimitAssist] 卖单止损价不高于入场价，拒绝下单"); return; }
      }
 
-   // v1.80: TP 方向校验 — 必须位于 entry 的盈利侧 (0.19 线被用户拖动 0.79 越过时会触发)
-   if(dir == DIR_UP  && tpPrice <= entry) { Alert("[FibLimitAssist] 买单 TP=0.19 不高于入场价, 拒绝下单"); return; }
-   if(dir == DIR_DOWN && tpPrice >= entry) { Alert("[FibLimitAssist] 卖单 TP=0.19 不低于入场价, 拒绝下单"); return; }
-
-   double lot = CalcLot(entry, sl);
-   double volMin = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   if(lot < volMin)
+   // v1.84: TP 方向校验 — 两个半仓 TP 都必须在 entry 的盈利侧
+   //   极端情况: 用户把 0.79 拖到 0.19 之外 → tp019 不在盈利侧, tp2 也不在
+   if(dir == DIR_UP)
      {
-      Alert("[FibLimitAssist] 计算手数 ", DoubleToString(lot, InpLotDecimals),
-            " 小于品种最小手数 ", DoubleToString(volMin, InpLotDecimals), "，拒绝下单");
+      if(tp019 <= entry) { Alert("[FibLimitAssist] 买单半仓 1 TP=0.19 不高于入场价, 拒绝下单"); return; }
+      if(tp2   <= entry) { Alert("[FibLimitAssist] 买单半仓 2 TP=2× 距离不高于入场价, 拒绝下单"); return; }
+     }
+   else
+     {
+      if(tp019 >= entry) { Alert("[FibLimitAssist] 卖单半仓 1 TP=0.19 不低于入场价, 拒绝下单"); return; }
+      if(tp2   >= entry) { Alert("[FibLimitAssist] 卖单半仓 2 TP=2× 距离不低于入场价, 拒绝下单"); return; }
+     }
+
+   // 总 lot = 单仓 lot (按 risk% 计算) — 总风险保持不变, 然后拆两半
+   double volMin  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double volStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   double totalLot = CalcLot(entry, sl);
+   if(totalLot < 2.0 * volMin - 1e-9)
+     {
+      // 半仓 lot < volMin 时无法安全拆单 (会触发券商最小手数校验)
+      Alert("[FibLimitAssist] 计算手数 ", DoubleToString(totalLot, InpLotDecimals),
+            " 不足以拆两半仓 (至少需要 ", DoubleToString(2.0 * volMin, InpLotDecimals), "), 拒绝下单");
       return;
      }
 
-   SendLimitOrder(dir, entry, sl, tpPrice, lot);
+   // 各半 lot — 向下对齐到 volStep, 至少 1 个 volMin
+   double halfLot = MathFloor(totalLot / 2.0 / volStep + 1e-9) * volStep;
+   if(halfLot < volMin) halfLot = volMin;
+   // 兜底: floor 后若单边仍 < volMin, 调整另一边 (通常不会触发, totalLot 校验已挡住)
+
+   // 两笔独立挂单, 同 entry + SL, 不同 TP, lot 各半, 注释后缀区分
+   //   注释 InpOrderComment = "FibLimitAssist" (14) + " (2/2)" (6) = 20 字符 < 31 上限, 安全
+   string c1 = InpOrderComment + " (1/2)";
+   string c2 = InpOrderComment + " (2/2)";
+   SendLimitOrderEx(dir, entry, sl, tp019, halfLot, c1);
+   SendLimitOrderEx(dir, entry, sl, tp2,   halfLot, c2);
+
+   Print("[FibLimitAssist] 0.79 拆单完成 vol=", DoubleToString(totalLot, InpLotDecimals),
+         " (各半 ", DoubleToString(halfLot, InpLotDecimals), ") | ",
+         "半仓1 TP=0.19=", DoubleToString(tp019, _Digits),
+         " 半仓2 TP=2×=",  DoubleToString(tp2,   _Digits));
   }
 
 //---------------------------- 市价下单 -----------------------------//

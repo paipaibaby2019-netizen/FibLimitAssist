@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.70"
-#property description "半自动斐波那契限价下单辅助 (v1.70)"
+#property version   "1.71"
+#property description "半自动斐波那契限价下单辅助 (v1.71)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -1363,8 +1363,10 @@ void UpdateFVGDisplay()
      }
 
    // 最新 K 线起点 (X2 右边界)
-   datetime lastBarTime = iTime(_Symbol, _Period, 1);
-   if(lastBarTime == 0) lastBarTime = iTime(_Symbol, _Period, 0);
+   // v1.71: 改用 shift=0 (当前正在形成 K 线的起点), 避免 C3=shift1 时 formTime==lastBarTime 导致零宽矩形
+   //   原 iTime(_Period,1) 在 C3 刚收线的瞬间与 formTime 相等, FVG 矩形 X1==X2 不可见, 要等下一根 K 线收线后才出现
+   datetime lastBarTime = iTime(_Symbol, _Period, 0);
+   if(lastBarTime == 0) lastBarTime = iTime(_Symbol, _Period, 1);
 
    // 绘制 / 更新
    for(int i = 0; i < allN; i++)
@@ -1375,11 +1377,12 @@ void UpdateFVGDisplay()
       string rectName = FVGObjName(all[i].formTime, all[i].tfMin);
       string lblName  = FVGLblName (all[i].formTime, all[i].tfMin);
 
-      // v1.60: 矩形右边界按状态分支
-      //   U (未填补) / P (部分填补) → X2 = lastBarTime (延伸至最新 K 线起点, 缺口当前仍存在)
+      // v1.60/v1.71: 矩形右边界按状态分支
+      //   U (未填补) / P (部分填补) → X2 = lastBarTime (延伸至当前正在形成 K 线起点, 缺口当前仍存在)
       //   F (完全填补)               → X2 = fillTime  (止于填补那根 K 线起点, 不再延伸)
       //   fillTime 为 0 时 (极端) fallback 到 lastBarTime
-      // 提到循环顶部声明, 供下方 show 分支 (矩形绘制) 与 showLbl 分支 (标签 X 锚点) 共用
+      // v1.71: lastBarTime 改用 iTime(0), U/P 矩形从 C3 收线起就有正常宽度, 不再延迟一根 K 线
+      //   提到循环顶部声明, 供下方 show 分支 (矩形绘制) 与 showLbl 分支 (标签 X 锚点) 共用
       datetime rectEndTime = (all[i].status == 2 && all[i].fillTime > 0)
                              ? all[i].fillTime
                              : lastBarTime;
@@ -1438,7 +1441,7 @@ void UpdateFVGDisplay()
             ObjectSetInteger(0, lblName, OBJPROP_CORNER,    CORNER_LEFT_UPPER);
            }
          // 计算标签目标屏幕位置: 跟随 FVG 顶边的"矩形右边界"时间
-         // v1.60: 改用 rectEndTime — U/P 状态 = lastBarTime (与矩形右边界对齐), F 状态 = fillTime (矩形右边界已止于填补 K 线起点)
+         // v1.60/v1.71: 改用 rectEndTime — U/P 状态 = iTime(0) 当前正在形成 K 线起点 (与矩形右边界对齐), F 状态 = fillTime (矩形右边界已止于填补 K 线起点)
          int px = 0, py = 0;
          if(ChartTimePriceToXY(0, 0, rectEndTime, all[i].top, px, py))
            {

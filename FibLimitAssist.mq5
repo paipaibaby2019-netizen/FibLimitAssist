@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.71"
-#property description "半自动斐波那契限价下单辅助 (v1.71)"
+#property version   "1.72"
+#property description "半自动斐波那契限价下单辅助 (v1.72)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -45,8 +45,9 @@ input int InpAdjustDepth     = 12; // [ADJUST] 分形识别窗口 (左右各 N �
 input int InpAdjustDeviation = 5;   // [ADJUST] 候选与前一同向极值最小偏差 (单位:点, 类比 zigzag ExtDeviation)
 input int InpAdjustBackstep  = 3;   // [ADJUST] 候选最小时间距离 (单位:bar, 类比 zigzag ExtBackstep, 用于替换紧挨假信号)
 
-// v1.17 新增: 1.00/0.00/0.79/0.49 线上 UP/DOWN 按钮 - 单击步长 = swing 区间 × (InpStepPercent)%, 双击 ×10
-input double InpStepPercent  = 1.0; // [STEP] 单击移动步长占 swing 区间百分比 (%); 双击同按钮 300ms 内 = ×10
+// v1.17 新增: 0.79/0.49 线上 UP/DOWN 按钮 - 单击步长 = swing 区间 × (InpStepPercent)%, 双击 ×10
+// v1.72: 1.00/0.00 端点 STEP 改为按 Williams 分形跳转 (上界找高/下界找低), 不再用此百分比; InpStepPercent 仅作用于 0.79/0.49
+input double InpStepPercent  = 1.0; // [STEP] 0.79/0.49 单击移动步长占 swing 区间百分比 (%); 双击同按钮 300ms 内 = ×10 (1.00/0.00 端点不受此影响, 改用 Williams 分形)
 
 // v1.38 新增: 默认斐波那契区间基准 — 最近 N 根已收盘 K 线的高低点 (数据驱动, 解决切周期时 ChartGetDouble(CHART_PRICE_MAX/MIN) 返回 0 或过窄导致线条挤死/跑出屏)
 input int InpDefaultSpanBars = 60; // [默认区间] 用最近多少根已收盘 bar 的 High/Low 作为默认区间 (0=不用, 恢复旧视图基准)
@@ -675,9 +676,14 @@ bool CreateStepButton(double ratio, int dir)
    ObjectSetString(0, name, OBJPROP_TEXT, (dir > 0 ? "▲" : "▼"));
    string rstr = DoubleToString(ratio, 2);
    string dirTxt = (dir > 0 ? "向上" : "向下");
-   ObjectSetString(0, name, OBJPROP_TOOLTIP,
-                   dirTxt + "移动 " + rstr + " 线 (单击=" +
-                   DoubleToString(InpStepPercent, 1) + "%, 双击=×10 加速)");
+   // v1.72: 1.00/0.00 端点 STEP 提示改为 Williams 分形跳转; 0.79/0.49 仍按百分比
+   string tip;
+   if(ratio == RATIO_100 || ratio == RATIO_000)
+      tip = dirTxt + "跳转到最近 Williams 分形 (上界找高/下界找低, 找不到保持不变)";
+   else
+      tip = dirTxt + "移动 " + rstr + " 线 (单击=" +
+            DoubleToString(InpStepPercent, 1) + "%, 双击=×10 加速)";
+   ObjectSetString(0, name, OBJPROP_TOOLTIP, tip);
    return true;
   }
 
@@ -801,7 +807,106 @@ double ClampStepMove(double ratio, int dir, double step)
    return newPrice;
   }
 
-// 处理 STEP 按钮点击: 解析 name → (ratio, dir), 双击检测, 计算步长, 调用 ApplyStepDrag
+// v1.72: 1.00/0.00 端点 STEP — 跳转到最近 Williams 分形
+//   上界 (高价线, 视觉上更高的那条) ▲ 按钮: 找最近的 Williams 高分形且 High > 当前上界价
+//   上界 (高价线) ▼ 按钮:                              且 High < 当前上界价
+//   下界 (低价线, 视觉上更低的那条) ▲ 按钮: 找最近的 Williams 低分形且 Low  > 当前下界价
+//   下界 (低价线) ▼ 按钮:                              且 Low  < 当前下界价
+//   搜索方向: j=1 (最右已收线) → firstBar (最左可见), 第一个匹配即返回 — 离当前价"最近" = 离 shift=0 时间最近
+//   排除 shift=0 未收线 bar (Williams 定义需要 j+1 < total, j 至少 1)
+//   搜索范围: 图表可见区 (firstBar)
+//   找不到分形 → Alert 提示, 端点保持不变
+//   移动端点后 0.79/0.49 按理论比例回归 (复用 ApplyStepDrag 行为)
+// 前向声明: IsWilliamsLow/IsWilliamsHigh 在文件靠后定义 (line ~2657), 这里提前引用需要先声明
+bool IsWilliamsLow (int j);
+bool IsWilliamsHigh(int j);
+bool ApplyStepToFractal(double ratio, int dir)
+  {
+   double curPrice = LevelPrice(ratio);
+   double topPrice = MathMax(g_p1, g_p0);
+   double botPrice = MathMin(g_p1, g_p0);
+   const double eps = _Point * 0.5;
+   bool isUpper = (MathAbs(curPrice - topPrice) < eps);
+   bool isLower = (MathAbs(curPrice - botPrice) < eps);
+   if(!isUpper && !isLower)
+     {
+      Alert("[FibLimitAssist] STEP ", DoubleToString(ratio, 2),
+            ": fib 区间未定义 (1.00 == 0.00), 端点保持不变");
+      return false;
+     }
+
+   // 可见区范围 (排除 shift=0 未收线)
+   int firstBar = (int)ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0);
+   if(firstBar < 1) firstBar = 1;
+   int totalBars = Bars(_Symbol, _Period);
+   int maxJ = MathMin(firstBar, totalBars - 2);   // j+1 < totalBars 才能 IsWilliams* 不越界
+   if(maxJ < 1)
+     {
+      Alert("[FibLimitAssist] STEP ", DoubleToString(ratio, 2),
+            ": 可见区数据不足, 端点保持不变");
+      return false;
+     }
+
+   bool        isUpBtn  = (dir > 0);
+   string      lineRole = isUpper ? "上界" : "下界";
+   string      dirSign  = isUpBtn ? "▲" : "▼";
+   string      target   = isUpBtn ? "更高" : "更低";
+   double      foundPrice = 0;
+   int         foundBar   = -1;
+
+   if(isUpper)
+     {
+      // 上界 → 找 Williams 高分形
+      for(int j = 1; j <= maxJ; j++)
+        {
+         if(!IsWilliamsHigh(j)) continue;
+         double h = iHigh(_Symbol, _Period, j);
+         if(h <= 0) continue;
+         bool match = isUpBtn ? (h > curPrice) : (h < curPrice);
+         if(match) { foundPrice = h; foundBar = j; break; }
+        }
+      if(foundBar < 0)
+        {
+         Alert("[FibLimitAssist] STEP ", DoubleToString(ratio, 2),
+               " (", lineRole, ") ", dirSign, ": 可见区找不到",
+               target, " 的 Williams 高分形, 端点保持不变");
+         return false;
+        }
+     }
+   else  // isLower
+     {
+      // 下界 → 找 Williams 低分形
+      for(int j = 1; j <= maxJ; j++)
+        {
+         if(!IsWilliamsLow(j)) continue;
+         double l = iLow(_Symbol, _Period, j);
+         if(l <= 0) continue;
+         bool match = isUpBtn ? (l > curPrice) : (l < curPrice);
+         if(match) { foundPrice = l; foundBar = j; break; }
+        }
+      if(foundBar < 0)
+        {
+         Alert("[FibLimitAssist] STEP ", DoubleToString(ratio, 2),
+               " (", lineRole, ") ", dirSign, ": 可见区找不到",
+               target, " 的 Williams 低分形, 端点保持不变");
+         return false;
+        }
+     }
+
+   Print("[STEP-FRACTAL] ", DoubleToString(ratio, 2),
+         " (", lineRole, ") ", dirSign, " → 跳转到", target, " Williams ",
+         isUpper ? "高" : "低", "分形",
+         " old=", DoubleToString(curPrice, _Digits),
+         " new=", DoubleToString(foundPrice, _Digits),
+         " srcBar=", foundBar,
+         " srcTime=", TimeToString(iTime(_Symbol, _Period, foundBar)));
+   ApplyStepDrag(ratio, foundPrice);  // 0.79/0.49 自动按理论比例回归
+   return true;
+  }
+
+// 处理 STEP 按钮点击: 解析 name → (ratio, dir), 分支处理
+// v1.72: 1.00/0.00 端点 → 跳转到最近 Williams 分形 (ApplyStepToFractal)
+//        0.79/0.49       → 保持原 InpStepPercent 百分比 + 双击 ×10 行为
 void ApplyStepButton(string name)
   {
    string sfx = StringSubstr(name, StringLen(g_prefix));
@@ -824,6 +929,16 @@ void ApplyStepButton(string name)
    // 释放按钮视觉
    ObjectSetInteger(0, name, OBJPROP_STATE, false);
 
+   // v1.72: 1.00/0.00 端点 STEP 改走 Williams 分形跳转 (不再用百分比步长, 单/双击行为一致)
+   if(ratio == RATIO_100 || ratio == RATIO_000)
+     {
+      g_lastStepName   = name;
+      g_lastStepTimeMs = GetTickCount();   // 仍记录, 避免与 0.79/0.49 的双击状态串台
+      ApplyStepToFractal(ratio, dir);
+      return;
+     }
+
+   // v1.17: 0.79/0.49 保持原 InpStepPercent 百分比行为 (双击 ×10)
    // 双击检测: 300ms 内同按钮再点 → ×10 倍步长
    long nowMs = GetTickCount();
    int  mult  = 1;

@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.76"
-#property description "半自动斐波那契限价下单辅助 (v1.76)"
+#property version   "1.77"
+#property description "半自动斐波那契限价下单辅助 (v1.77)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -14,7 +14,8 @@
 #property description "v1.50-v1.59 修复详情见项目说明文档第 13 章 (描述符总数受限, 变更记录仅保留概要)"
 #property description "v1.61 顶部按钮左对齐链: LONG→ADJUST→CANCEL 类似底部 HIDE→RISK→FVG 链, stepBox+8/92/176 递进"
 #property description "v1.74 MKT+STP 横向相邻 4px 整体居中 (替代原 MARKET 居中 + STOP 上下排), LONG/SHORT 统一 STP 在 MKT 右边"
-#property description "v1.75 MKT 与 STP 中间新增实时点差标签 (1.5), gap 从 4px 扩到 40px 容纳可读文字, OBJ_LABEL ANCHOR_CENTER 居中显示"
+#property description "v1.75 MKT 与 STP 中间新增实时点差标签 (1.5), gap 4px→40px 容纳标签, ANCHOR_CENTER 居中显示"
+#property description "v1.77 spread gap 40px→56px (修 v1.75-v1.76 括号压按钮边缘), 整对 110+56+110=276 关于 w/2 居中; Y yBtn+11→yBtn+9 视觉更居中"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -1071,8 +1072,8 @@ void UpdateTopButtons()
 //   v1.32-v1.73 是 MARKET 居中 + STOP 在 MARKET 正下方 (上下排)
 //   现在 MKT 和 STP 同 Y (yBtn), STP 在 MKT 右边 4px, 整体 (224px) 关于图表中心左右对称
 //   LONG/SHORT 模式统一: STP 永远在 MKT 右边 (用户对两种方向要求一致)
-// v1.75: 中间新增实时点差标签 (形如 "(1.5)"), 因此 gap 从 UI(4) 扩大到 UI(40) 容纳 ~30px 标签宽度
-//   整体宽度 110+40+110=260 关于图表中心 w/2 左右对称; spread 标签用 ANCHOR_CENTER 居中到 gap 几何中心
+// v1.77: 中间新增实时点差标签 (形如 "(1.5)"), 因此 gap 从 UI(4) 扩大到 UI(56) 容纳 ~40px 标签宽度 + 余量
+//   整体宽度 110+56+110=276 关于图表中心 w/2 左右对称; spread 标签用 ANCHOR_CENTER 居中到 gap 几何中心
 //   (gap 扩大的取舍: 与 v1.74 的 "4px" 紧贴布局冲突, 但 4px 无法容纳可读文字, 用户的 "在中间加数字" 优先)
 void UpdateBottomButtons()
   {
@@ -1082,10 +1083,12 @@ void UpdateBottomButtons()
    int yBtn = y - UI(26); if(yBtn < 0) yBtn = 0;
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
 
-   // v1.75: MKT(110) + 40px 间隔(放点差标签) + STP(110) = 260 整体, 关于 w/2 左右对称
-   //   v1.74 gap=UI(4) → v1.75 gap=UI(40), 因新增 spread 标签需要可读空间
+   // v1.77: MKT(110) + 56px 间隔(放点差标签) + STP(110) = 276 整体, 关于 w/2 左右对称
+   //   v1.75 gap=UI(40) → v1.76 → v1.77 gap=UI(56): 用户反馈 v1.75-v1.76 的 40px 装不下 "(15.0)" 文字
+   //   字号 Font(7) 的 5 字符文字宽度约 35-45px, 40px 时括号刚好压在两侧按钮边缘
+   //   56px 给文字每侧 ~8-10px 余量, 视觉清晰不重叠
    int marketW  = UI(110);
-   int gapW     = UI(40);
+   int gapW     = UI(56);
    int pairW    = marketW + gapW + marketW;
    int pairLeft = (w - pairW) / 2;
    int marketX  = pairLeft;
@@ -1155,11 +1158,11 @@ void UpdateBottomButtons()
       ObjectSetInteger(0, StopName(), OBJPROP_YDISTANCE, yBtn);
      }
 
-   // v1.75: 点差标签 — gap 几何中心, ANCHOR_CENTER 居中 (Y 用按钮中线 yBtn+11 让文字在按钮高度中央)
+   // v1.77: 点差标签 — gap 几何中心, ANCHOR_CENTER 居中 (Y=yBtn+UI(9) 让文字在 22px 按钮中视觉居中)
    if(ObjectFind(0, SpreadName()) >= 0)
      {
       ObjectSetInteger(0, SpreadName(), OBJPROP_XDISTANCE, spreadX);
-      ObjectSetInteger(0, SpreadName(), OBJPROP_YDISTANCE, yBtn + UI(11));
+      ObjectSetInteger(0, SpreadName(), OBJPROP_YDISTANCE, yBtn + UI(9));
      }
   }
 

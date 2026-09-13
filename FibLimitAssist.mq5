@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.75"
-#property description "半自动斐波那契限价下单辅助 (v1.75)"
+#property version   "1.76"
+#property description "半自动斐波那契限价下单辅助 (v1.76)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -14,7 +14,7 @@
 #property description "v1.50-v1.59 修复详情见项目说明文档第 13 章 (描述符总数受限, 变更记录仅保留概要)"
 #property description "v1.61 顶部按钮左对齐链: LONG→ADJUST→CANCEL 类似底部 HIDE→RISK→FVG 链, stepBox+8/92/176 递进"
 #property description "v1.74 MKT+STP 横向相邻 4px 整体居中 (替代原 MARKET 居中 + STOP 上下排), LONG/SHORT 统一 STP 在 MKT 右边"
-#property description "v1.75 MKT 与 STP 中间新增实时点差标签 (1.5), gap 从 4px 扩到 40px 容纳可读文字, OBJ_LABEL ANCHOR_CENTER_UPPER 居中显示"
+#property description "v1.75 MKT 与 STP 中间新增实时点差标签 (1.5), gap 从 4px 扩到 40px 容纳可读文字, OBJ_LABEL ANCHOR_CENTER 居中显示"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -561,7 +561,7 @@ bool CreateSpreadLabel(string name)
    ObjectSetString(0, name, OBJPROP_TEXT, "");
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Font(7));
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER_UPPER);  // X/Y 都居中: X=gap 中心, Y=yBtn 顶端
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER);  // 居中锚点: (X,Y) 居中, X=gap 中心, Y=按钮中线
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
    ObjectSetInteger(0, name, OBJPROP_BACK, false);
@@ -1072,7 +1072,7 @@ void UpdateTopButtons()
 //   现在 MKT 和 STP 同 Y (yBtn), STP 在 MKT 右边 4px, 整体 (224px) 关于图表中心左右对称
 //   LONG/SHORT 模式统一: STP 永远在 MKT 右边 (用户对两种方向要求一致)
 // v1.75: 中间新增实时点差标签 (形如 "(1.5)"), 因此 gap 从 UI(4) 扩大到 UI(40) 容纳 ~30px 标签宽度
-//   整体宽度 110+40+110=260 关于图表中心 w/2 左右对称; spread 标签用 ANCHOR_CENTER_UPPER 居中到 gap 几何中心
+//   整体宽度 110+40+110=260 关于图表中心 w/2 左右对称; spread 标签用 ANCHOR_CENTER 居中到 gap 几何中心
 //   (gap 扩大的取舍: 与 v1.74 的 "4px" 紧贴布局冲突, 但 4px 无法容纳可读文字, 用户的 "在中间加数字" 优先)
 void UpdateBottomButtons()
   {
@@ -1090,7 +1090,7 @@ void UpdateBottomButtons()
    int pairLeft = (w - pairW) / 2;
    int marketX  = pairLeft;
    int stopX    = pairLeft + marketW + gapW;
-   int spreadX  = pairLeft + marketW + gapW / 2;   // gap 几何中心, ANCHOR_CENTER_UPPER 居中
+   int spreadX  = pairLeft + marketW + gapW / 2;   // gap 几何中心, ANCHOR_CENTER 居中
 
    // 左侧 HIDE / RISK
    // v1.22: HIDE / RISK 右移到 STEP 按钮 (X=[6, 52]) 右侧, 避免 long 模式
@@ -1155,11 +1155,11 @@ void UpdateBottomButtons()
       ObjectSetInteger(0, StopName(), OBJPROP_YDISTANCE, yBtn);
      }
 
-   // v1.75: 点差标签 — gap 几何中心, 与 MKT/STP 同 Y (yBtn + 4 与 P/L 标签同高)
+   // v1.75: 点差标签 — gap 几何中心, ANCHOR_CENTER 居中 (Y 用按钮中线 yBtn+11 让文字在按钮高度中央)
    if(ObjectFind(0, SpreadName()) >= 0)
      {
       ObjectSetInteger(0, SpreadName(), OBJPROP_XDISTANCE, spreadX);
-      ObjectSetInteger(0, SpreadName(), OBJPROP_YDISTANCE, yBtn + UI(4));
+      ObjectSetInteger(0, SpreadName(), OBJPROP_YDISTANCE, yBtn + UI(11));
      }
   }
 

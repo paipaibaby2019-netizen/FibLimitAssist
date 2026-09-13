@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.81"
-#property description "半自动斐波那契限价下单辅助 (v1.81)"
+#property version   "1.82"
+#property description "半自动斐波那契限价下单辅助 (v1.82)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -20,6 +20,7 @@
 #property description "v1.79 装饰线由 0.21 改为 0.19 (RATIO_021 → RATIO_019), 标签/水平线/ADJUST 提示/拖拽识别同步"
 #property description "v1.80 0.79 挂单 TP 改为 0.19 装饰线位置 (原 3:1 RR); 新增 PlaceOrderWithAbsoluteTP, SL 公式不变, 加 TP 方向校验 (防 0.79 拖过 0.19)"
 #property description "v1.81 FVG 右侧新增 FILL 按钮 (切换 status=2 填补态显隐, 默认 OFF), 与 InpFVG_ShowFilled AND 关系; 新增 g_fillShown 全局, UpdateFillButton 同步文字/颜色"
+#property description "v1.82 InpFVG_ShowFilled 默认 false→true (主开关默认开, FILL 按钮仍默认 OFF); EVEN/CHALF/CALL 从顶部第二排移到 0.49 挂单线, X 不变, Y=screenY(0.49)-UI(11) 让线穿按钮中"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -103,7 +104,7 @@ input int             InpPullbackMaxBars  = 25;           // [信号] 回调段�
 // v1.45 新增: FVG (公允价值缺口) 矩形画图
 input bool               InpFVG_ShowUnfilled     = true;    // [FVG] 显示未填补 (绿/红)
 input bool               InpFVG_ShowPartial     = true;    // [FVG] 显示部分填补 (蓝/橙)
-input bool               InpFVG_ShowFilled       = false;    // [FVG] 显示完全填补 (灰, 默认关)
+input bool               InpFVG_ShowFilled       = true;    // [FVG] 显示完全填补 (灰, 默认开 — 主开关; 运行时仍由 FILL 按钮控制, FILL 按钮默认 OFF=隐藏)
 input bool               InpFVG_ShowLabel        = false;   // [FVG] 显示 FVG 标签 (U·M15 形式, 默认关 — 默认只画矩形不画文字)
 input bool               InpFVG_HigherTF_Enabled = false;  // [FVG] 叠加高级别 FVG
 input bool               InpFVG_HigherTF_Auto    = true;    // [FVG] 自动按当前周期选高级别 (Auto=false 时用 InpFVG_HigherTF_Period)
@@ -1063,24 +1064,31 @@ void UpdateTopButtons()
       ObjectSetInteger(0, cancelName, OBJPROP_YDISTANCE, yBtn);
      }
 
-   // v1.66: 第二排 EVEN / CHALF / CALL — 顶部按钮正下方, X 按实际按钮宽度递进 (避免 CHALF 与 CALL 重叠)
-   //   EVEN(80)→CHALF(100)→CALL(100), 间距均 4px: 8 / 92 / 196
-   //   v1.65 错方案: 直接复用顶部 X (stepBox+8/92/176) — 因 CHALF 宽 100, 右沿到 192, 与 CALL 左沿 176 重叠 16px
-   int yBtnRow2 = yBtn + UI(22) + UI(4);
-   if(ObjectFind(0, EvenName()) >= 0)
+   // v1.82: EVEN / CHALF / CALL 移到 0.49 挂单线, 让 0.49 挂单线从三个按钮中间穿过
+   //   v1.66 顶部第二排 → v1.82 改为中段: X 保持原位置 (stepBox+8/92/196), 仅调整 Y
+   //   buttonY = screenY(0.49 线) - UI(11), UI(11)=按钮高 UI(22)/2, 让按钮几何中心对齐 0.49 线
+   //   0.49 线用 g_p49 (LevelPrice 内部: 用户拖动过的取 g_p49, 否则取理论值)
+   double midPrice = LevelPrice(RATIO_049);
+   int mx = 0, my = 0;
+   if(ChartTimePriceToXY(0, 0, RightAnchor(), midPrice, mx, my))
      {
-      ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, stepBox + UI(8));
-      ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yBtnRow2);
-     }
-   if(ObjectFind(0, CloseHalfName()) >= 0)
-     {
-      ObjectSetInteger(0, CloseHalfName(), OBJPROP_XDISTANCE, stepBox + UI(8) + UI(80) + UI(4));
-      ObjectSetInteger(0, CloseHalfName(), OBJPROP_YDISTANCE, yBtnRow2);
-     }
-   if(ObjectFind(0, CloseAllName()) >= 0)
-     {
-      ObjectSetInteger(0, CloseAllName(), OBJPROP_XDISTANCE, stepBox + UI(8) + UI(80) + UI(4) + UI(80) + UI(4));
-      ObjectSetInteger(0, CloseAllName(), OBJPROP_YDISTANCE, yBtnRow2);
+      int yBtn49 = my - UI(11);   // 按钮顶部 Y, 让按钮中心 = my (0.49 线屏幕 Y)
+      if(yBtn49 < 0) yBtn49 = 0;
+      if(ObjectFind(0, EvenName()) >= 0)
+        {
+         ObjectSetInteger(0, EvenName(), OBJPROP_XDISTANCE, stepBox + UI(8));
+         ObjectSetInteger(0, EvenName(), OBJPROP_YDISTANCE, yBtn49);
+        }
+      if(ObjectFind(0, CloseHalfName()) >= 0)
+        {
+         ObjectSetInteger(0, CloseHalfName(), OBJPROP_XDISTANCE, stepBox + UI(8) + UI(80) + UI(4));
+         ObjectSetInteger(0, CloseHalfName(), OBJPROP_YDISTANCE, yBtn49);
+        }
+      if(ObjectFind(0, CloseAllName()) >= 0)
+        {
+         ObjectSetInteger(0, CloseAllName(), OBJPROP_XDISTANCE, stepBox + UI(8) + UI(80) + UI(4) + UI(80) + UI(4));
+         ObjectSetInteger(0, CloseAllName(), OBJPROP_YDISTANCE, yBtn49);
+        }
      }
   }
 

@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.72"
-#property description "半自动斐波那契限价下单辅助 (v1.72)"
+#property version   "1.73"
+#property description "半自动斐波那契限价下单辅助 (v1.73)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -517,7 +517,7 @@ void CreateObjects()
    CreateActionButton(EvenName(),           80, "EVEN",          C'60,120,200',  "一键入场价（仅当前品种）：盈利仓位SL改到入场；亏损仓位TP改到入场（保本平仓）");
    CreateActionButton(RiskName(),           80, "",              C'90,90,90',   "点击循环切换单笔风险档位：0.5% → 1% → 2% → 0.5%");
    CreateActionButton(MarketName(),        110, "MARKET",        C'140,140,140',"市价下单（止损 = 1.00 ± Range×1%，盈亏比 1:1）");
-   CreateActionButton(StopName(),          110, "STOP",          CLR_FLAT_BG,    "突破挂单: BUY STOP (long) 挂在视觉 topPrice + 1 tick, SELL STOP (short) 挂在视觉 botPrice - 1 tick; SL/TP/lot 与 MARKET 共用公式");
+   CreateActionButton(StopName(),          110, "STOP",          CLR_FLAT_BG,    "突破挂单: BUY STOP (long) 挂在最新已收线 K 线 High + 1 tick, SELL STOP (short) 挂在最新已收线 K 线 Low - 1 tick (v1.73 与 fib 线条解耦); SL/TP/lot 与 MARKET 共用公式");
    CreateActionButton(HideName(),           80, "HIDE",          CLR_HIDE_OFF,   "隐藏/显示 EA 全部线条与按钮（此按钮自身始终显示）");
    // v1.45: FVG 切换按钮 (在 HIDE 右侧, sticky 行为, 文字 FVG/OFF, 默认开)
    CreateActionButton(FVGButtonName(),      80, "FVG",           CLR_FVG_OFF,    "切换 FVG 矩形显示 (公允价值缺口): OFF=隐藏, FVG=显示 (上涨浅绿 / 下跌浅红 / 完全填补浅灰; v1.58 不再区分未填补与部分填补)");
@@ -2256,8 +2256,12 @@ void SendStopOrder(int dir, double price, double sl, double tp, double lot)
          " TP=",   DoubleToString(tp,    _Digits));
   }
 
-// v1.31: 突破挂单 — 入场=视觉 topPrice+1tick (BUY STOP) / botPrice-1tick (SELL STOP),
-//   SL/TP/lot 与市价按钮完全一致 (复用 PlaceMarketOrder 的公式).
+// v1.31: 突破挂单 — SL/TP/lot 与市价按钮完全一致 (复用 PlaceMarketOrder 的公式)
+// v1.73: 入场价改为"最新已收线 K 线 High/Low ± 1 tick", 不再参考 fib 1.00/0.00 端点
+//   LONG → BUY STOP  entry = iHigh(1) + _Point   (最新已收线 K 线最高价上方 1 tick)
+//   SHORT → SELL STOP entry = iLow(1)  - _Point   (最新已收线 K 线最低价下方 1 tick)
+//   "最新已收线" = shift=1 的 K 线 (排除当前正在形成的 shift=0)
+//   SL 公式仍锚 g_p1 (与 MKT 共用); TP = 1:1 盈亏比 (与 MKT 共用); lot = CalcLot (与 MKT 共用)
 void PlaceStopOrder()
   {
    int dir = Dir();
@@ -2267,11 +2271,18 @@ void PlaceStopOrder()
       return;
      }
 
-   double topPrice = MathMax(g_p1, g_p0);
-   double botPrice = MathMin(g_p1, g_p0);
-   double entry    = (dir == DIR_UP) ? NormalizeDouble(topPrice + _Point, _Digits)
-                                     : NormalizeDouble(botPrice - _Point, _Digits);
-   double range    = MathAbs(g_p0 - g_p1);
+   // v1.73: 入场 = 最新已收线 K 线的 High (LONG) / Low (SHORT) ± 1 tick
+   double lastHigh = iHigh(_Symbol, _Period, 1);
+   double lastLow  = iLow (_Symbol, _Period, 1);
+   if(lastHigh <= 0 || lastLow <= 0)
+     {
+      Alert("[FibLimitAssist] 最新已收线 K 线数据无效 (H=", DoubleToString(lastHigh, _Digits),
+            " L=", DoubleToString(lastLow, _Digits), "), 拒绝突破单");
+      return;
+     }
+   double entry = (dir == DIR_UP) ? NormalizeDouble(lastHigh + _Point, _Digits)
+                                  : NormalizeDouble(lastLow  - _Point, _Digits);
+   double range = MathAbs(g_p0 - g_p1);
 
    // SL 公式与市价按钮一致: g_p1 ± range * InpSL_OffsetPercent/100 (BUY 在 1.00 下方, SELL 在 1.00 上方)
    double sl = (dir == DIR_UP) ? (g_p1 - range * InpSL_OffsetPercent / 100.0)

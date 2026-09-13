@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.73"
-#property description "半自动斐波那契限价下单辅助 (v1.73)"
+#property version   "1.74"
+#property description "半自动斐波那契限价下单辅助 (v1.74)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -1044,8 +1044,12 @@ void UpdateTopButtons()
   }
 
 // 最下面那根线的全部按钮 (v1.08)：
-//  左侧：HIDE(80) | RISK(80) | FVG(80) | ... | MARKET(110 居中) | ...
+//  左侧：HIDE(80) | RISK(80) | FVG(80) | ... | MARKET(110) + STOP(110) 横向居中 | ...
 //  右侧仓位按钮 (EVEN/CHALF/CALL) 已在 v1.65 移到顶部第二排 (UpdateTopButtons)
+// v1.74: MARKET + STOP 改为横向相邻 (4px 间隔), 一对整体居中
+//   v1.32-v1.73 是 MARKET 居中 + STOP 在 MARKET 正下方 (上下排)
+//   现在 MKT 和 STP 同 Y (yBtn), STP 在 MKT 右边 4px, 整体 (224px) 关于图表中心左右对称
+//   LONG/SHORT 模式统一: STP 永远在 MKT 右边 (用户对两种方向要求一致)
 void UpdateBottomButtons()
   {
    double botPrice = MathMin(g_p1, g_p0);
@@ -1054,9 +1058,12 @@ void UpdateBottomButtons()
    int yBtn = y - UI(26); if(yBtn < 0) yBtn = 0;
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
 
-   // MARKET 居中位置 (宽 110, v1.27 UI 缩放)
-   int marketW = UI(110);
-   int marketX = (w - marketW) / 2;
+   // v1.74: MKT(110) + 4px 间隔 + STP(110) = 224 整体, 关于 w/2 左右对称
+   int marketW  = UI(110);
+   int pairW    = marketW + UI(4) + marketW;
+   int pairLeft = (w - pairW) / 2;
+   int marketX  = pairLeft;
+   int stopX    = pairLeft + marketW + UI(4);
 
    // 左侧 HIDE / RISK
    // v1.22: HIDE / RISK 右移到 STEP 按钮 (X=[6, 52]) 右侧, 避免 long 模式
@@ -1093,31 +1100,31 @@ void UpdateBottomButtons()
      }
 
    // v1.08：MKT 两侧 P/L 标签（OBJ_LABEL 像素定位）
-   // PL_LEFT：MKT 左 4px 处，右对齐文字（"(-1012)"等，最右字符对齐到该 X）
-   // PL_RIGHT：MKT 右 4px 处，左对齐文字
+   // v1.74: P/L 标签改为对应到"MKT+STP 整对"的左右两侧 (整体宽度 224)
+   //   PL_LEFT:  整对左 4px 处 (即 pairLeft - 6, 文字右对齐)
+   //   PL_RIGHT: 整对右 4px 处 (即 stopX + marketW + 6, 文字左对齐)
    if(ObjectFind(0, PnLLeftName()) >= 0)
      {
       ObjectSetInteger(0, PnLLeftName(), OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
-      ObjectSetInteger(0, PnLLeftName(), OBJPROP_XDISTANCE, marketX - UI(6));
+      ObjectSetInteger(0, PnLLeftName(), OBJPROP_XDISTANCE, pairLeft - UI(6));
       ObjectSetInteger(0, PnLLeftName(), OBJPROP_YDISTANCE, yBtn + UI(4));
      }
    if(ObjectFind(0, PnLRightName()) >= 0)
      {
       ObjectSetInteger(0, PnLRightName(), OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-      ObjectSetInteger(0, PnLRightName(), OBJPROP_XDISTANCE, marketX + marketW + UI(6));
+      ObjectSetInteger(0, PnLRightName(), OBJPROP_XDISTANCE, stopX + marketW + UI(6));
       ObjectSetInteger(0, PnLRightName(), OBJPROP_YDISTANCE, yBtn + UI(4));
      }
 
    // v1.65: 右侧 EVEN / CHALF / CALL 已移到顶部第二排 (UpdateTopButtons), 这里不再设置
    //   历史: v1.61 右侧 g_btnX 右对齐 → v1.62/v1.63 镜像到底部/顶部对齐 → v1.64 撤回 → v1.65 最终方案: 顶部第二排
 
-   // v1.32: BUY/SELL STOP 按钮 — 与 MARKET 同宽、同中心、关于底线镜像对称
-   //  MARKET: 顶边距底线 4px 上方 (yBtn = y - 26)
-   //  STOP:   顶边距底线 4px 下方 (y + 4)
+   // v1.74: STOP 与 MKT 横向相邻 (右边 4px), 同 Y (yBtn) — 不再上下排
+   //   v1.32-v1.73 是在 MARKET 正下方 y + UI(4); 现在统一到 yBtn (与 MKT 同高)
    if(ObjectFind(0, StopName()) >= 0)
      {
-      ObjectSetInteger(0, StopName(), OBJPROP_XDISTANCE, marketX);  // 与 MARKET 同 X 中心
-      ObjectSetInteger(0, StopName(), OBJPROP_YDISTANCE, y + UI(4));
+      ObjectSetInteger(0, StopName(), OBJPROP_XDISTANCE, stopX);
+      ObjectSetInteger(0, StopName(), OBJPROP_YDISTANCE, yBtn);
      }
   }
 

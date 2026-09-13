@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.69"
-#property description "半自动斐波那契限价下单辅助 (v1.69)"
+#property version   "1.70"
+#property description "半自动斐波那契限价下单辅助 (v1.70)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -21,6 +21,7 @@
 #property description "v1.67 撤回 v1.66 偏移: CHALF 宽 100→80 (与 ADJUST 对齐), CALL 保持 100 (与 CANCEL 对齐); CALL X 回 stepBox+176 — 三对按钮左右边缘完全对齐"
 #property description "v1.68 ADJUST 新逻辑: 基于最近 FVG 找高低点 — 复用现有 DetectFVG(仅当前周期) 找最近 FVG, 看涨→强制 LONG (1.00=FVG K2 左侧 Williams 低, 0.00=FVG K2→bar0 max high); 看跌→强制 SHORT (镜像); 找不到 FVG/Williams 分形 回退到原 FindNearestSwing 逻辑"
 #property description "v1.69 ADJUST FVG 修复: FindMostRecentFVG_K2 原只取 formTime 最大的单个 FVG, 若它是未成熟(K3=bar0)则直接 return -1; 改为按 formTime 降序逐个尝试, 跳过未成熟的, 用次近的已收线 FVG"
+#property description "v1.70 ADJUST 跳过已完全填补 FVG: FindMostRecentFVG_K2 在 K2 已收线后, 调 ClassifyFVGStatus 判 status; 若 status=2 (完全填补) 则 continue 试次近的, 优先选未填补/部分填补的 FVG"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -2565,6 +2566,7 @@ bool IsWilliamsHigh(int j)
 //   fvgDir 输出 DIR_UP / DIR_DOWN
 //   返回 -1 表示未找到或 K2 不满足已收线要求
 //   范围限定为图表可见区 (与现有 FVG 矩形绘制同源, 但仅用当前周期, 不混 higherTF 避免跨周期混乱)
+// v1.70: 跳过 status=2 (完全填补) 的 FVG — 按 formTime 降序逐个尝试, 第一个未填补/部分填补的即返回
 int FindMostRecentFVG_K2(int &fvgDir)
   {
    int firstBar = (int)ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0);
@@ -2602,6 +2604,9 @@ int FindMostRecentFVG_K2(int &fvgDir)
       if(k3Shift < 1) continue;  // K3 未收线 (bar 0), 跳过试次近的
       int k2Shift = k3Shift + 1;
       if(k2Shift < 1) continue;  // K2 必须已收线
+      // v1.70: 跳过已完全填补 (status=2) 的 FVG, 试次近的 (U=0, P=1 可用)
+      ClassifyFVGStatus(arr[best], _Period);
+      if(arr[best].status == 2) continue;
       fvgDir = arr[best].dir;
       return k2Shift;
      }

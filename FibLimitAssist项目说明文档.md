@@ -81,7 +81,18 @@ price_r = price_1.00 + (1 - r) × (price_0.00 - price_1.00)
 
 > **多空切换按钮**（SWAP，v1.26 位置改 / v1.61 改为左对齐）：**水平方向改为左对齐链**——`x = stepBox + 8`（`stepBox` = STEP 按钮列右边缘，即与底部 HIDE 按钮同 X），**垂直放在最上面那根线（`MathMax(price_1.00, price_0.00)`）下方 4px**（不再被线穿过）。点击后对调 `1.00`（起点）与 `0.00`（终点），方向自动翻转，`0.79`/`0.49` 回归理论比例。按钮文字实时显示当前方向（`LONG` / `SHORT` / `FLAT`），底色随方向变化（绿 / 红 / 灰）。**点击后立即自动回弹**（不再 sticky）。v1.61 改左对齐的原因：原居中布局让顶部右侧留白过大，与底部 `HIDE/RISK/FVG` 左列无视觉对齐。
 >
-> **ADJUST 一键调整按钮**（v1.13 新增 / v1.61 跟随 LONG）：水平方向 `x = stepBox + 8 + 80 + 4 = stepBox + 92`，即 LONG 右侧 4px（与底部 RISK 跟随 HIDE 同款模式），垂直同样在线下方 4px。点击后把 `1.00`/`0.00` 自动调整到图表上**最近的高低点**（移植 zigzag 分形识别，参数见第 10 章），`0.79`/`0.49` 回归理论比例。适合快速对齐当前 swing 区间。
+> **ADJUST 一键调整按钮**（v1.13 新增 / v1.61 跟随 LONG / **v1.68 重写为 FVG-based 逻辑**）：水平方向 `x = stepBox + 8 + 80 + 4 = stepBox + 92`，即 LONG 右侧 4px（与底部 RISK 跟随 HIDE 同款模式），垂直同样在线下方 4px。**v1.68 新逻辑**（保留原 v1.13 Williams Fractal 作为回退）：
+> 1. 复用现有 `DetectFVG` 在图表可见区扫描当前周期所有 FVG，取 `formTime` 最大的（即最近一个）；其 K2（中间脉冲 K 线）必须已收线（K2 ≥ bar 1）。
+> 2. **看涨 FVG → 强制 LONG**：
+>    - `g_p1` (1.00) = K2 左侧最近一个 **Williams 低分形**（K[j].Low < K[j-1].Low 且 K[j].Low < K[j+1].Low；扫描从 K2+1 向左到 firstBar，第一个匹配即返回）
+>    - `g_p0` (0.00) = K2 → bar 0 范围内 max High（**含实时 K 线**的 tick 最高价）
+> 3. **看跌 FVG → 强制 SHORT**（镜像）：
+>    - `g_p1` (1.00) = K2 左侧最近一个 **Williams 高分形**
+>    - `g_p0` (0.00) = K2 → bar 0 范围内 min Low（含实时 K 线）
+> 4. 0.79/0.49 立即回归理论值（与拖动端点行为一致）。
+> 5. **失败/回退**：若找不到有效 FVG（弹 Alert "未找到有效 FVG, 回退到 Williams Fractal 逻辑"），或看涨/看跌 FVG 左侧无 Williams 分形（弹 Alert 拒绝），自动回退到 v1.13–v1.67 的 `FindNearestSwing` Williams Fractal 逻辑。
+>
+> 适用范围：仅当前周期（`InpFVG_HigherTF_Enabled` 高级别 FVG 不参与 ADJUST，避免跨周期 K 线时间错位）。`InpAdjustDepth`/`Deviation`/`Backstep` 三个参数仅在回退路径使用。
 >
 > **CANCEL 取消挂单按钮**（v1.61 改为跟随 ADJUST）：水平方向 `x = stepBox + 8 + 80 + 4 + 80 + 4 = stepBox + 176`，即 ADJUST 右侧 4px（与底部 FVG 跟随 RISK 同款模式）。原右对齐（`g_btnX = w - 108`）已废弃，顶部三个按钮全部左对齐形成"LONG → ADJUST → CANCEL"链，与底部"HIDE → RISK → FVG"链视觉对齐。
 
@@ -475,5 +486,6 @@ Range = |price_1.00 − price_0.00|
 | 1.66 | 2026-09-12 | **修 v1.65 第二排 CALL X 重叠 bug**：CALL X 从 `stepBox + 176` 改为 `stepBox + 196`，按实际按钮宽度递进 `EVEN(80) + 4 + CHALF(100) + 4 = 196`。三按钮 X 终值：`stepBox + 8/92/196`。EVEN/CHALF 与顶部 LONG/ADJUST 左对齐保持不变；CALL 比 CANCEL 右移 20px（因 CHALF 比 ADJUST 宽 20px），保证 4px 间距。 |
 | 1.66 → 1.67 | 2026-09-12 | **用户提出第三种方案 — 让按钮宽度对齐而非 X 偏移**：v1.66 的 X 偏移方案（`stepBox+8/92/196`）虽解决了重叠，但 CALL 相对 CANCEL 右移 20px 视觉上不对称。用户希望直接让第二排按钮宽度等于顶部对应按钮宽度，恢复干净的 `stepBox+8/92/176` 递进，三对按钮左右边缘完全对齐。**v1.67 实现**： |
 | 1.67 | 2026-09-12 | **第二排 CHALF 宽 100→80 — 按钮宽度与顶部对齐**：① `CreateActionButton(CloseHalfName(), 100, "CHALF", ...)` 改为 `(CloseHalfName(), 80, "CHALF", ...)`（CHALF 与 ADJUST 同样 80 宽）；② `UpdateTopButtons` 中 CALL X 从 `stepBox+8+80+4+100+4 = 196` 改回 `stepBox+8+80+4+80+4 = 176`（与顶部 CANCEL 同 X）；③ 撤回 v1.66 的 X 偏移方案，顶部两排共 6 按钮形成"宽 80/80/100"两两对齐的 3×2 矩阵。最终 X 终值：`stepBox + 8/92/176`（与 v1.65 一致）；宽度：EVEN(80)=LONG(80) / CHALF(80)=ADJUST(80) / CALL(100)=CANCEL(100)。 |
+| 1.68 | 2026-09-12 | **ADJUST 重写为 FVG-based 逻辑**（v1.13 Williams Fractal 退居回退路径）。**新流程**：①复用 `DetectFVG(_Period, firstBar, lastBar)` 在图表可见区扫当前周期 FVG（不含 higherTF），取 `formTime` 最大的（即最近一个）；②按 FVG 方向分两支 — 看涨 FVG 强制 LONG：`g_p1` = K2 左侧最近 Williams 低分形（3-bar 严格定义 `K[j].Low < K[j±1].Low`，扫描 j=K2+1→firstBar 第一个匹配），`g_p0` = K2→bar0 max High（含实时 K 线 tick 价）；看跌 FVG 强制 SHORT：镜像交换（`g_p1`=Williams 高，`g_p0`=K2→bar0 min Low）；③赋值后 `g_p79`/`g_p49` 回归理论值，`RefreshAll()` 重画，Alert 输出 FVG 类型/K2 索引/高低点价格与时间/方向/Range。**回退条件**：找不到有效 FVG（`FindMostRecentFVG_K2` 返回 -1）→ Alert 提示并回退；找到 FVG 但左侧无 Williams 分形 → Alert 拒绝，**不动**。**新增**：`IsWilliamsLow(int j)` / `IsWilliamsHigh(int j)` 严格 3-bar Williams 判定；`FindMostRecentFVG_K2(int &fvgDir)` 找最近 FVG 的 K2 索引；`DoAdjustFVG()` 包装新逻辑返回 bool。`DoAdjust()` 改为先试 FVG 失败回退到原 `FindNearestSwing` body。 |
 
 > **版本缺口已回补**：v1.10~v1.44 已全部同步至本文档。其中 v1.10/v1.11/v1.12/v1.14 在 git 中无独立提交（本地迭代后随 v1.13 一次性推送，或被后续版本号跳号），内容以代码注释标注为准。

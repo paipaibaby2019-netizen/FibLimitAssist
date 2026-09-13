@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.67"
-#property description "半自动斐波那契限价下单辅助 (v1.67)"
+#property version   "1.68"
+#property description "半自动斐波那契限价下单辅助 (v1.68)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -19,6 +19,7 @@
 #property description "v1.65 EVEN/CHALF/CALL 移到顶部第二排 (CANCEL 正下方): X 对齐 LONG/ADJUST/CANCEL (stepBox+8/92/176), Y = 第一排 + 按钮高 + 4px 间距 — 形成顶部 3×2 对称矩阵"
 #property description "v1.66 修 v1.65 错位: 第二排 CALL X 从 176 改 196 — 因 CHALF 宽 100, 原 stepBox+8/92/176 让 CHALF 右沿(192)与 CALL 左沿(176)重叠 16px; 改为按实际宽度递进 stepBox+8/92/196"
 #property description "v1.67 撤回 v1.66 偏移: CHALF 宽 100→80 (与 ADJUST 对齐), CALL 保持 100 (与 CANCEL 对齐); CALL X 回 stepBox+176 — 三对按钮左右边缘完全对齐"
+#property description "v1.68 ADJUST 新逻辑: 基于最近 FVG 找高低点 — 复用现有 DetectFVG(仅当前周期) 找最近 FVG, 看涨→强制 LONG (1.00=FVG K2 左侧 Williams 低, 0.00=FVG K2→bar0 max high); 看跌→强制 SHORT (镜像); 找不到 FVG/Williams 分形 回退到原 FindNearestSwing 逻辑"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -2531,11 +2532,229 @@ bool FindNearestSwing(int dir, datetime &outTime, double &outPrice)
   }
 
 //+------------------------------------------------------------------+
+//| v1.68: ADJUST 新逻辑 - 基于最近 FVG 找高低点                       |
+//+------------------------------------------------------------------+
+
+// 简单 3-bar Williams 低分形: K[j].Low < K[j-1].Low 且 K[j].Low < K[j+1].Low
+//   j 必须 > 0 (左侧邻居存在) 且 < totalBars-1 (右侧邻居存在)
+bool IsWilliamsLow(int j)
+  {
+   int total = Bars(_Symbol, _Period);
+   if(j <= 0 || j >= total - 1) return false;
+   double L  = iLow (_Symbol, _Period, j);
+   double LL = iLow (_Symbol, _Period, j - 1);
+   double LR = iLow (_Symbol, _Period, j + 1);
+   if(L <= 0 || LL <= 0 || LR <= 0) return false;
+   return (L < LL) && (L < LR);
+  }
+
+// 简单 3-bar Williams 高分形: K[j].High > K[j-1].High 且 K[j].High > K[j+1].High
+bool IsWilliamsHigh(int j)
+  {
+   int total = Bars(_Symbol, _Period);
+   if(j <= 0 || j >= total - 1) return false;
+   double H  = iHigh(_Symbol, _Period, j);
+   double HL = iHigh(_Symbol, _Period, j - 1);
+   double HR = iHigh(_Symbol, _Period, j + 1);
+   if(H <= 0 || HL <= 0 || HR <= 0) return false;
+   return (H > HL) && (H > HR);
+  }
+
+// v1.68: 找最近一个 FVG (按 formTime 最大), 返回其 K2 (中间 K 线) 的 bar index
+//   fvgDir 输出 DIR_UP / DIR_DOWN
+//   返回 -1 表示未找到或 K2 不满足已收线要求
+//   范围限定为图表可见区 (与现有 FVG 矩形绘制同源, 但仅用当前周期, 不混 higherTF 避免跨周期混乱)
+int FindMostRecentFVG_K2(int &fvgDir)
+  {
+   int firstBar = (int)ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0);
+   if(firstBar < 0) firstBar = 0;
+   int widthBars = (int)ChartGetInteger(0, CHART_WIDTH_IN_BARS, 0);
+   if(widthBars < 3) widthBars = 3;
+   int lastBar = MathMax(0, firstBar - widthBars + 1);
+   lastBar = MathMax(0, lastBar - 5);
+
+   FVGRecord arr[];
+   ArrayResize(arr, 0);
+   DetectFVG(_Period, firstBar, lastBar, arr);
+   if(ArraySize(arr) == 0) return -1;
+
+   int best = 0;
+   for(int i = 1; i < ArraySize(arr); i++)
+     {
+      if(arr[i].formTime > arr[best].formTime) best = i;
+     }
+
+   fvgDir = arr[best].dir;
+   // DetectFVG: formTime = c3Time (K3 收线时间). K2 在 K3 前 1 根 (索引 +1).
+   int k3Shift = iBarShift(_Symbol, _Period, arr[best].formTime);
+   if(k3Shift < 1) return -1;  // K3 至少 bar 1 → K2 至少 bar 2
+   int k2Shift = k3Shift + 1;
+   if(k2Shift < 1) return -1;  // K2 必须已收线
+   return k2Shift;
+  }
+
+// v1.68: ADJUST 新逻辑 — 基于最近 FVG 找高低点
+//   看涨 FVG → 强制 LONG: g_p1 (1.00) = FVG K2 左侧最近 Williams 低, g_p0 (0.00) = K2→bar0 max high
+//   看跌 FVG → 强制 SHORT: g_p1 (1.00) = FVG K2 左侧最近 Williams 高, g_p0 (0.00) = K2→bar0 min low
+//   返回 true 成功; false 失败 (调用方回退到原 Williams Fractal 逻辑)
+bool DoAdjustFVG()
+  {
+   int fvgDir = DIR_FLAT;
+   int fvgK2 = FindMostRecentFVG_K2(fvgDir);
+   if(fvgK2 < 0)
+     {
+      Alert("[FibLimitAssist] ADJUST: 未找到有效 FVG, 回退到 Williams Fractal 逻辑");
+      return false;
+     }
+
+   int firstBar = (int)ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0);
+   if(firstBar < 0) firstBar = 0;
+   int totalBars = Bars(_Symbol, _Period);
+   int maxScanIdx = MathMin(firstBar, totalBars - 2);  // j+1 < totalBars 需满足
+
+   double pH = 0, pL = 0;
+   datetime tH = 0, tL = 0;
+   int srcHBar = 0, srcLBar = 0;
+
+   if(fvgDir == DIR_UP)  // 看涨 FVG → LONG (1.00 下方, 0.00 上方)
+     {
+      // 高点 (0.00) = FVG K2 → bar 0 的 max high (含实时 K 线)
+      pH = iHigh(_Symbol, _Period, fvgK2);
+      srcHBar = fvgK2;
+      for(int i = fvgK2 - 1; i >= 0; i--)
+        {
+         double h = iHigh(_Symbol, _Period, i);
+         if(h > pH) { pH = h; srcHBar = i; }
+        }
+      tH = iTime(_Symbol, _Period, srcHBar);
+
+      // 低点 (1.00) = FVG K2 左侧最近 Williams 低 (向左扫, 第一个匹配即返回)
+      int foundL = -1;
+      for(int j = fvgK2 + 1; j <= maxScanIdx; j++)
+        {
+         if(IsWilliamsLow(j)) { foundL = j; break; }
+        }
+      if(foundL < 0)
+        {
+         Alert("[FibLimitAssist] ADJUST 失败: 找到看涨 FVG (K2=bar ", fvgK2,
+               "), 但左侧无 Williams 低点, 拒绝调整");
+         return false;
+        }
+      pL = iLow(_Symbol, _Period, foundL);
+      srcLBar = foundL;
+      tL = iTime(_Symbol, _Period, srcLBar);
+     }
+   else if(fvgDir == DIR_DOWN)  // 看跌 FVG → SHORT (1.00 上方, 0.00 下方) — 镜像
+     {
+      // 高点 (1.00) = FVG K2 左侧最近 Williams 高
+      int foundH = -1;
+      for(int j = fvgK2 + 1; j <= maxScanIdx; j++)
+        {
+         if(IsWilliamsHigh(j)) { foundH = j; break; }
+        }
+      if(foundH < 0)
+       {
+         Alert("[FibLimitAssist] ADJUST 失败: 找到看跌 FVG (K2=bar ", fvgK2,
+               "), 但左侧无 Williams 高点, 拒绝调整");
+         return false;
+        }
+      pH = iHigh(_Symbol, _Period, foundH);
+      srcHBar = foundH;
+      tH = iTime(_Symbol, _Period, srcHBar);
+
+      // 低点 (0.00) = FVG K2 → bar 0 的 min low (含实时 K 线)
+      pL = iLow(_Symbol, _Period, fvgK2);
+      srcLBar = fvgK2;
+      for(int i = fvgK2 - 1; i >= 0; i--)
+        {
+         double l = iLow(_Symbol, _Period, i);
+         if(l < pL) { pL = l; srcLBar = i; }
+        }
+      tL = iTime(_Symbol, _Period, srcLBar);
+     }
+   else
+     {
+      Alert("[FibLimitAssist] ADJUST: 未知 FVG 方向, 回退");
+      return false;
+     }
+
+   // 异常检查
+   if(MathAbs(pH - pL) < _Point * InpAdjustDeviation)
+     {
+      Alert("[FibLimitAssist] ADJUST 失败: 识别的高低点距离过近 (",
+            DoubleToString(MathAbs(pH - pL) / _Point, 1), " points < ", InpAdjustDeviation, "), 拒绝");
+      return false;
+     }
+   if(pH <= pL)
+     {
+      Alert("[FibLimitAssist] ADJUST 失败: 高点(", DoubleToString(pH, _Digits), ") <= 低点(",
+            DoubleToString(pL, _Digits), "), 数据异常, 拒绝");
+      return false;
+     }
+   if(tH > TimeCurrent() || tL > TimeCurrent())
+     {
+      Alert("[FibLimitAssist] ADJUST 失败: 时间在未来 (H=", TimeToString(tH),
+            ", L=", TimeToString(tL), "), 数据异常, 拒绝");
+      return false;
+     }
+
+   // 赋值 — 按 fvgDir 直接设置 LONG/SHORT 语义 (无需 SWAP)
+   //   看涨 (LONG):  g_p1 (1.00) = pL (低, 下方) | g_p0 (0.00) = pH (高, 上方)
+   //   看跌 (SHORT): g_p1 (1.00) = pH (高, 上方) | g_p0 (0.00) = pL (低, 下方)
+   if(fvgDir == DIR_UP)
+     {
+      g_p1 = NormalizeDouble(pL, _Digits);
+      g_p0 = NormalizeDouble(pH, _Digits);
+     }
+   else  // DIR_DOWN
+     {
+      g_p1 = NormalizeDouble(pH, _Digits);
+      g_p0 = NormalizeDouble(pL, _Digits);
+     }
+
+   // 0.79/0.49 回归理论
+   g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
+   g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
+
+   // 重画
+   RefreshAll();
+
+   // 反馈
+   int dir = Dir();
+   string dirText  = (dir == DIR_UP)   ? "做多" : ((dir == DIR_DOWN) ? "做空" : "FLAT");
+   string fvgText  = (fvgDir == DIR_UP) ? "看涨" : "看跌";
+   double rangePts = MathAbs(pH - pL) / _Point;
+
+   Print("[ADJUST v1.68] FVG=", fvgText, "  K2=bar ", fvgK2,
+         "  time=", TimeToString(iTime(_Symbol, _Period, fvgK2), TIME_DATE|TIME_MINUTES));
+   Print("[ADJUST v1.68] High (1.00): ", DoubleToString(pH, _Digits),
+         "  time=", TimeToString(tH, TIME_DATE|TIME_MINUTES), "  bar=", srcHBar);
+   Print("[ADJUST v1.68] Low  (0.00): ", DoubleToString(pL, _Digits),
+         "  time=", TimeToString(tL, TIME_DATE|TIME_MINUTES), "  bar=", srcLBar);
+   Print("[ADJUST v1.68] Range:       ", DoubleToString(rangePts, 1), " points");
+   Print("[ADJUST v1.68] Direction:   ", dirText);
+   Print("[ADJUST v1.68] 0.79 = ", DoubleToString(TheoPrice(RATIO_079, g_p1, g_p0), _Digits));
+   Print("[ADJUST v1.68] 0.49 = ", DoubleToString(TheoPrice(RATIO_049, g_p1, g_p0), _Digits));
+
+   Alert("[FibLimitAssist] ADJUST 完成 (", _Symbol, ", ", fvgText, " FVG): ",
+         "1.00=", DoubleToString(pH, _Digits), " (", TimeToString(tH, TIME_DATE|TIME_MINUTES), "), ",
+         "0.00=", DoubleToString(pL, _Digits), " (", TimeToString(tL, TIME_DATE|TIME_MINUTES), "), ",
+         "Range=", DoubleToString(rangePts, 1), " points, 方向=", dirText);
+
+   return true;
+  }
+
+//+------------------------------------------------------------------+
 //| v1.13: ADJUST 入口 - 点击按钮后调用                                |
+//| v1.68: 改为先试 FVG 新逻辑, 失败回退到原 Williams Fractal 逻辑       |
 //+------------------------------------------------------------------+
 void DoAdjust()
   {
-   // 1. 找最近高点 (1.00)
+   // 1. v1.68 先试 FVG 新逻辑
+   if(DoAdjustFVG()) return;
+
+   // 2. 回退: 原 Williams Fractal 逻辑 (v1.13-v1.67)
+   //    1) 找最近高点 (1.00)
    datetime tH = 0; double pH = 0;
    if(!FindNearestSwing(DIR_UP, tH, pH))
      {
@@ -2543,7 +2762,7 @@ void DoAdjust()
       return;
      }
 
-   // 2. 找最近低点 (0.00)
+   //    2) 找最近低点 (0.00)
    datetime tL = 0; double pL = 0;
    if(!FindNearestSwing(DIR_DOWN, tL, pL))
      {
@@ -2551,7 +2770,7 @@ void DoAdjust()
       return;
      }
 
-   // 3. 异常检查
+   //    3) 异常检查
    if(MathAbs(pH - pL) < _Point * InpAdjustDeviation)
      {
       Alert("[FibLimitAssist] ADJUST 失败: 识别的高低点距离过近 (",
@@ -2571,34 +2790,31 @@ void DoAdjust()
       return;
      }
 
-   // 4. 改全局变量: 1.00 / 0.00 按新高低点
+   //    4) 改全局变量: 1.00 / 0.00 按新高低点 (原逻辑固定 1.00=高, 0.00=低, 默认 SHORT 方向)
    g_p1 = NormalizeDouble(pH, _Digits);   // 1.00 = 最近高点
    g_p0 = NormalizeDouble(pL, _Digits);   // 0.00 = 最近低点
 
-   // 端点变了 → 0.49 / 0.79 立即回归理论值 (与 ApplyDrag 拖动端点行为一致).
-   // 否则 g_p79/g_p49 残留的手调值会让按钮停在旧位置.
+   //    5) 端点变了 → 0.49 / 0.79 立即回归理论值 (与 ApplyDrag 拖动端点行为一致).
    g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
    g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
 
-   // 5. v1.15: 端点位置不再记忆, 这里无需保存 (下次插入会重新初始化)
-
-   // 6. 重画
+   //    6) 重画
    RefreshAll();
 
-   // 7. 反馈 (Print + Alert)
+   //    7) 反馈 (Print + Alert)
    double rangePoints = (pH - pL) / _Point;
    int dir = Dir();
    string dirText = (dir == DIR_UP) ? "做多" : ((dir == DIR_DOWN) ? "做空" : "FLAT");
 
-   Print("[ADJUST] High (1.00): ", DoubleToString(pH, _Digits),
+   Print("[ADJUST] (回退) High (1.00): ", DoubleToString(pH, _Digits),
          "  time=", TimeToString(tH, TIME_DATE|TIME_MINUTES));
-   Print("[ADJUST] Low  (0.00): ", DoubleToString(pL, _Digits),
+   Print("[ADJUST] (回退) Low  (0.00): ", DoubleToString(pL, _Digits),
          "  time=", TimeToString(tL, TIME_DATE|TIME_MINUTES));
-   Print("[ADJUST] Range:       ", DoubleToString(rangePoints, 1), " points (", DoubleToString(pH - pL, _Digits), ")");
-   Print("[ADJUST] Direction:   ", dirText);
-   Print("[ADJUST] 0.79 = ", DoubleToString(TheoPrice(RATIO_079, g_p1, g_p0), _Digits));
-   Print("[ADJUST] 0.49 = ", DoubleToString(TheoPrice(RATIO_049, g_p1, g_p0), _Digits));
-   Print("[ADJUST] 0.21 = ", DoubleToString(TheoPrice(RATIO_021, g_p1, g_p0), _Digits));
+   Print("[ADJUST] (回退) Range:       ", DoubleToString(rangePoints, 1), " points (", DoubleToString(pH - pL, _Digits), ")");
+   Print("[ADJUST] (回退) Direction:   ", dirText);
+   Print("[ADJUST] (回退) 0.79 = ", DoubleToString(TheoPrice(RATIO_079, g_p1, g_p0), _Digits));
+   Print("[ADJUST] (回退) 0.49 = ", DoubleToString(TheoPrice(RATIO_049, g_p1, g_p0), _Digits));
+   Print("[ADJUST] (回退) 0.21 = ", DoubleToString(TheoPrice(RATIO_021, g_p1, g_p0), _Digits));
 
    Alert("[FibLimitAssist] ADJUST 完成 (", _Symbol, "): ",
          "1.00=", DoubleToString(pH, _Digits), " (高点, ", TimeToString(tH, TIME_DATE|TIME_MINUTES), "), ",

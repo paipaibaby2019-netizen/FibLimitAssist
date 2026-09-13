@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.68"
-#property description "半自动斐波那契限价下单辅助 (v1.68)"
+#property version   "1.69"
+#property description "半自动斐波那契限价下单辅助 (v1.69)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -20,6 +20,7 @@
 #property description "v1.66 修 v1.65 错位: 第二排 CALL X 从 176 改 196 — 因 CHALF 宽 100, 原 stepBox+8/92/176 让 CHALF 右沿(192)与 CALL 左沿(176)重叠 16px; 改为按实际宽度递进 stepBox+8/92/196"
 #property description "v1.67 撤回 v1.66 偏移: CHALF 宽 100→80 (与 ADJUST 对齐), CALL 保持 100 (与 CANCEL 对齐); CALL X 回 stepBox+176 — 三对按钮左右边缘完全对齐"
 #property description "v1.68 ADJUST 新逻辑: 基于最近 FVG 找高低点 — 复用现有 DetectFVG(仅当前周期) 找最近 FVG, 看涨→强制 LONG (1.00=FVG K2 左侧 Williams 低, 0.00=FVG K2→bar0 max high); 看跌→强制 SHORT (镜像); 找不到 FVG/Williams 分形 回退到原 FindNearestSwing 逻辑"
+#property description "v1.69 ADJUST FVG 修复: FindMostRecentFVG_K2 原只取 formTime 最大的单个 FVG, 若它是未成熟(K3=bar0)则直接 return -1; 改为按 formTime 降序逐个尝试, 跳过未成熟的, 用次近的已收线 FVG"
 
 //---------------------------- 输入参数 -----------------------------//
 // 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
@@ -2578,19 +2579,34 @@ int FindMostRecentFVG_K2(int &fvgDir)
    DetectFVG(_Period, firstBar, lastBar, arr);
    if(ArraySize(arr) == 0) return -1;
 
-   int best = 0;
-   for(int i = 1; i < ArraySize(arr); i++)
+   // v1.69: 按 formTime 降序逐个尝试, 跳过 K3 未收线 (bar 0) 的未成熟 FVG
+   //   原逻辑只取 formTime 最大的一个, 若它是未成熟则直接 return -1
+   //   但图表上往左还有已收线的成熟 FVG, 应该用那些
+   bool tried[];
+   ArrayResize(tried, ArraySize(arr));
+   ArrayInitialize(tried, false);
+
+   for(int pass = 0; pass < ArraySize(arr); pass++)
      {
-      if(arr[i].formTime > arr[best].formTime) best = i;
+      int best = -1;
+      for(int i = 0; i < ArraySize(arr); i++)
+        {
+         if(tried[i]) continue;
+         if(best < 0 || arr[i].formTime > arr[best].formTime) best = i;
+        }
+      if(best < 0) break;
+      tried[best] = true;
+
+      // DetectFVG: formTime = c3Time (K3 收线时间). K2 在 K3 前 1 根 (索引 +1).
+      int k3Shift = iBarShift(_Symbol, _Period, arr[best].formTime);
+      if(k3Shift < 1) continue;  // K3 未收线 (bar 0), 跳过试次近的
+      int k2Shift = k3Shift + 1;
+      if(k2Shift < 1) continue;  // K2 必须已收线
+      fvgDir = arr[best].dir;
+      return k2Shift;
      }
 
-   fvgDir = arr[best].dir;
-   // DetectFVG: formTime = c3Time (K3 收线时间). K2 在 K3 前 1 根 (索引 +1).
-   int k3Shift = iBarShift(_Symbol, _Period, arr[best].formTime);
-   if(k3Shift < 1) return -1;  // K3 至少 bar 1 → K2 至少 bar 2
-   int k2Shift = k3Shift + 1;
-   if(k2Shift < 1) return -1;  // K2 必须已收线
-   return k2Shift;
+   return -1;
   }
 
 // v1.68: ADJUST 新逻辑 — 基于最近 FVG 找高低点

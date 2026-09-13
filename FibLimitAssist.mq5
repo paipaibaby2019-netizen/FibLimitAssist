@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.77"
-#property description "半自动斐波那契限价下单辅助 (v1.77)"
+#property version   "1.78"
+#property description "半自动斐波那契限价下单辅助 (v1.78)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -16,6 +16,7 @@
 #property description "v1.74 MKT+STP 横向相邻 4px 整体居中 (替代原 MARKET 居中 + STOP 上下排), LONG/SHORT 统一 STP 在 MKT 右边"
 #property description "v1.75 MKT 与 STP 中间新增实时点差标签 (1.5), gap 4px→40px 容纳标签, ANCHOR_CENTER 居中显示"
 #property description "v1.77 spread gap 40px→56px (修 v1.75-v1.76 括号压按钮边缘), 整对 110+56+110=276 关于 w/2 居中; Y yBtn+11→yBtn+9 视觉更居中"
+#property description "v1.78 FVG 标签显隐由 InpFVG_ShowLabel 控制 (默认 false, 只画矩形不画文字); 保留 width>200 兜底"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -100,6 +101,7 @@ input int             InpPullbackMaxBars  = 25;           // [信号] 回调段�
 input bool               InpFVG_ShowUnfilled     = true;    // [FVG] 显示未填补 (绿/红)
 input bool               InpFVG_ShowPartial     = true;    // [FVG] 显示部分填补 (蓝/橙)
 input bool               InpFVG_ShowFilled       = false;    // [FVG] 显示完全填补 (灰, 默认关)
+input bool               InpFVG_ShowLabel        = false;   // [FVG] 显示 FVG 标签 (U·M15 形式, 默认关 — 默认只画矩形不画文字)
 input bool               InpFVG_HigherTF_Enabled = false;  // [FVG] 叠加高级别 FVG
 input bool               InpFVG_HigherTF_Auto    = true;    // [FVG] 自动按当前周期选高级别 (Auto=false 时用 InpFVG_HigherTF_Period)
 input ENUM_TIMEFRAMES    InpFVG_HigherTF_Period  = PERIOD_H1;// [FVG] 手动指定的高级周期 (Auto=false 时生效)
@@ -1586,7 +1588,9 @@ void UpdateFVGDisplay()
       // v1.47: 右上角小标签 — OBJ_LABEL 在 MQL5 中是屏幕坐标对象, OBJPROP_TIME/PRICE 不适用
       //   必须先用 ChartTimePriceToXY 把时间/价格转屏幕坐标, 再用 OBJPROP_XDISTANCE/YDISTANCE 设置
       //   锚点 ANCHOR_RIGHT_UPPER: 标签右上角对齐到 (x, y), 即标签正好显示在矩形顶边的右上侧
-      bool showLbl = show && (ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0) > 200);
+      // v1.78: 标签显隐由 InpFVG_ShowLabel 控制 (默认 false — 只画矩形不画文字)
+      //   同时保留 width>200 兜底: 小窗口标签会遮挡 K 线
+      bool showLbl = show && InpFVG_ShowLabel && (ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0) > 200);
       if(showLbl)
         {
          string tfStr = TFShortStr(all[i].tfMin);

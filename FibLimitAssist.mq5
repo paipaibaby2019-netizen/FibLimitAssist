@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.78"
-#property description "半自动斐波那契限价下单辅助 (v1.78)"
+#property version   "1.79"
+#property description "半自动斐波那契限价下单辅助 (v1.79)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -17,6 +17,7 @@
 #property description "v1.75 MKT 与 STP 中间新增实时点差标签 (1.5), gap 4px→40px 容纳标签, ANCHOR_CENTER 居中显示"
 #property description "v1.77 spread gap 40px→56px (修 v1.75-v1.76 括号压按钮边缘), 整对 110+56+110=276 关于 w/2 居中; Y yBtn+11→yBtn+9 视觉更居中"
 #property description "v1.78 FVG 标签显隐由 InpFVG_ShowLabel 控制 (默认 false, 只画矩形不画文字); 保留 width>200 兜底"
+#property description "v1.79 装饰线由 0.21 改为 0.19 (RATIO_021 → RATIO_019), 标签/水平线/ADJUST 提示/拖拽识别同步"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -111,13 +112,13 @@ input int                InpFVG_MinPoints        = 0;         // [FVG] 最小缺
 #define RATIO_100 1.00
 #define RATIO_079 0.79
 #define RATIO_049 0.49
-#define RATIO_021 0.21
+#define RATIO_019 0.19
 #define RATIO_000 0.00
 
 //---------------------------- 颜色定义 -----------------------------//
 #define CLR_END      C'90,90,90'     // 端点 1.00 / 0.00 线
 // v1.25 删除 CLR_MID：0.79/0.49 线颜色改为随方向动态变化 (DIR_UP→CLR_BUY_BG 绿, DIR_DOWN→CLR_SELL_BG 红, DIR_FLAT→CLR_FLAT_BG 灰), 由 RefreshAll 同步
-#define CLR_DECO     C'115,115,115'  // 0.21 装饰线（加深，避免看不清）
+#define CLR_DECO     C'115,115,115'  // 0.19 装饰线（加深，避免看不清）
 #define CLR_BUY_BG   C'76,175,80'    // 买单按钮底色 (+0.79/0.49 线 long 态)
 #define CLR_SELL_BG  C'244,67,54'    // 卖单按钮底色 (+0.79/0.49 线 short 态)
 #define CLR_FLAT_BG  C'140,140,140'  // 方向未定义按钮底色 (+0.79/0.49 线未方向态)
@@ -480,7 +481,7 @@ bool CreateAdjustButton()
                    "一键将 1.00/0.00 调整到图表上最近的高低点 (zigzag 3 参数分形识别)\n"
                    "· 1.00 → 最近的高点 (datetime 距今最近)\n"
                    "· 0.00 → 最近的低点 (datetime 距今最近)\n"
-                   "· 0.21/0.49/0.79 自动按新 Range 重新计算\n"
+                   "· 0.19/0.49/0.79 自动按新 Range 重新计算\n"
                    "参数: Depth=" + IntegerToString(InpAdjustDepth) +
                    ", Deviation=" + IntegerToString(InpAdjustDeviation) +
                    ", Backstep=" + IntegerToString(InpAdjustBackstep));
@@ -512,7 +513,7 @@ void CreateObjects()
    CreateHLine(HName(RATIO_000), g_p0,  true,  CLR_END,  STYLE_SOLID, 2);
    CreateHLine(HName(RATIO_079), g_p79, true,  CLR_FLAT_BG, STYLE_SOLID, 1);
    CreateHLine(HName(RATIO_049), g_p49, true,  CLR_FLAT_BG, STYLE_SOLID, 1);
-   CreateHLine(HName(RATIO_021), TheoPrice(RATIO_021, g_p1, g_p0), false, CLR_DECO, STYLE_DASHDOT, 1);
+   CreateHLine(HName(RATIO_019), TheoPrice(RATIO_019, g_p1, g_p0), false, CLR_DECO, STYLE_DASHDOT, 1);
 
    CreateButton(BName(RATIO_079));
    CreateButton(BName(RATIO_049));
@@ -539,7 +540,7 @@ void CreateObjects()
    // v1.75: MKT 与 STP 中间的实时点差标签 (形如 "(1.5)" — 单位 points/10=pips)
    CreateSpreadLabel(SpreadName());
 
-   CreateLabelRight(LName(RATIO_021), "0.21", CLR_DECO);
+   CreateLabelRight(LName(RATIO_019), "0.19", CLR_DECO);
 
    CreateStepButtons();   // v1.17: 1.00/0.79/0.49/0.00 各一对 UP/DOWN 按钮
   }
@@ -613,7 +614,7 @@ void UpdateLabel(string name, double price)
    ObjectSetDouble(0, name, OBJPROP_PRICE, price);
   }
 // 右对齐标签更新：像素定位，右边缘对齐挂单按钮右边缘（w-8 = g_btnX+100）
-//  v1.08b：0.21 标签右边缘与 0.79/0.49 按钮、CALL 按钮右边缘对齐
+//  v1.08b：0.19 标签右边缘与 0.79/0.49 按钮、CALL 按钮右边缘对齐
 void UpdateLabelRight(string name, double price, string text)
   {
    if(ObjectFind(0, name) < 0) return;
@@ -1718,7 +1719,7 @@ void RefreshAll()
    UpdateLabel(HName(RATIO_000), g_p0);
    UpdateLabel(HName(RATIO_079), g_p79);
    UpdateLabel(HName(RATIO_049), g_p49);
-   UpdateLabel(HName(RATIO_021), TheoPrice(RATIO_021, g_p1, g_p0));
+   UpdateLabel(HName(RATIO_019), TheoPrice(RATIO_019, g_p1, g_p0));
 
    int dir = Dir();
    double price79 = LevelPrice(RATIO_079);
@@ -1744,7 +1745,7 @@ void RefreshAll()
    UpdateRatioLabels();  // v1.34：底线下方的盈亏比三指标 (浮盈占比/风险回报比/百分比)
    UpdateSpreadDisplay(); // v1.75：MKT 与 STP 中间的实时点差标签 "(1.5)"
 
-   UpdateLabelRight(LName(RATIO_021), TheoPrice(RATIO_021, g_p1, g_p0), "0.21");  // v1.07：仅保留 0.21 标签
+   UpdateLabelRight(LName(RATIO_019), TheoPrice(RATIO_019, g_p1, g_p0), "0.19");  // v1.07：仅保留 0.19 标签
 
    ApplyHidden();
    ChartRedraw(0);
@@ -3029,7 +3030,7 @@ void DoAdjust()
    Print("[ADJUST] (回退) Direction:   ", dirText);
    Print("[ADJUST] (回退) 0.79 = ", DoubleToString(TheoPrice(RATIO_079, g_p1, g_p0), _Digits));
    Print("[ADJUST] (回退) 0.49 = ", DoubleToString(TheoPrice(RATIO_049, g_p1, g_p0), _Digits));
-   Print("[ADJUST] (回退) 0.21 = ", DoubleToString(TheoPrice(RATIO_021, g_p1, g_p0), _Digits));
+   Print("[ADJUST] (回退) 0.19 = ", DoubleToString(TheoPrice(RATIO_019, g_p1, g_p0), _Digits));
 
    Alert("[FibLimitAssist] ADJUST 完成 (", _Symbol, "): ",
          "1.00=", DoubleToString(pH, _Digits), " (高点, ", TimeToString(tH, TIME_DATE|TIME_MINUTES), "), ",
@@ -3068,7 +3069,7 @@ double RatioOfHLine(string name)
    if(name == HName(RATIO_079)) return RATIO_079;
    if(name == HName(RATIO_049)) return RATIO_049;
    if(name == HName(RATIO_000)) return RATIO_000;
-   return -1.0;   // 0.21 不可拖拽，忽略
+   return -1.0;   // 0.19 不可拖拽，忽略
   }
 double RatioOfButton(string name)
   {

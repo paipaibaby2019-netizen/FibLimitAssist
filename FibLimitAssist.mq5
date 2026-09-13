@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.79"
-#property description "半自动斐波那契限价下单辅助 (v1.79)"
+#property version   "1.80"
+#property description "半自动斐波那契限价下单辅助 (v1.80)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -18,6 +18,7 @@
 #property description "v1.77 spread gap 40px→56px (修 v1.75-v1.76 括号压按钮边缘), 整对 110+56+110=276 关于 w/2 居中; Y yBtn+11→yBtn+9 视觉更居中"
 #property description "v1.78 FVG 标签显隐由 InpFVG_ShowLabel 控制 (默认 false, 只画矩形不画文字); 保留 width>200 兜底"
 #property description "v1.79 装饰线由 0.21 改为 0.19 (RATIO_021 → RATIO_019), 标签/水平线/ADJUST 提示/拖拽识别同步"
+#property description "v1.80 0.79 挂单 TP 改为 0.19 装饰线位置 (原 3:1 RR); 新增 PlaceOrderWithAbsoluteTP, SL 公式不变, 加 TP 方向校验 (防 0.79 拖过 0.19)"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -29,7 +30,7 @@
 #property description "v1.70 ADJUST 跳过已完全填补 FVG: FindMostRecentFVG_K2 在 K2 已收线后, 调 ClassifyFVGStatus 判 status; 若 status=2 (完全填补) 则 continue 试次近的, 优先选未填补/部分填补的 FVG"
 
 //---------------------------- 输入参数 -----------------------------//
-// 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79=3:1, 0.49=1:1, 市价=1:1)
+// 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2)，盈亏比按比例分档 (0.79 挂单 TP=0.19 装饰线位置, 0.49 挂单=1:1, 市价=1:1)
 input double InpSL_OffsetPercent = 1.0;        // 止损向外偏移占区间百分比 (%)
 input int    InpLotDecimals      = 2;          // 手数截断保留的小数位 (不四舍五入)
 input long   InpMagicNumber      = 20260903;   // 订单魔术号
@@ -2217,11 +2218,63 @@ void PlaceOrderWithRR(double r, double rr)
    SendLimitOrder(dir, entry, sl, tp, lot);
   }
 
-// 0.79 挂单 → 3 倍盈亏比；0.49 挂单 → 1 倍盈亏比
+// v1.80: 0.79 挂单 TP 改为 0.19 装饰线位置 (RATIO_019); 0.49 保持 1:1 RR
+//   历史: v1.06 起 0.79 → RR=3.0 (TP 距离 = 3 × SL 距离); v1.80 起 0.79 → TP = TheoPrice(0.19)
+//   0.19 线位于 1.00/0.00 区间的另一端 (相对 0.79 远离 1.00), 因此:
+//   - LONG (1.00 在底): 0.79 入场 ≈ 下部, 0.19 在上部 → TP > entry ✓
+//   - SHORT (1.00 在顶): 0.79 入场 ≈ 上部, 0.19 在下部 → TP < entry ✓
 void PlaceOrder(double r)
   {
-   double rr = (r == RATIO_079) ? 3.0 : 1.0;
-   PlaceOrderWithRR(r, rr);
+   if(r == RATIO_079)
+     {
+      PlaceOrderWithAbsoluteTP(r, TheoPrice(RATIO_019, g_p1, g_p0));
+      return;
+     }
+   PlaceOrderWithRR(r, 1.0);
+  }
+
+// v1.80: 挂单用绝对 TP 价位 (不再按 RR 倍数计算)
+//   复用 PlaceOrderWithRR 的 SL 公式 (g_p1 ± range × InpSL_OffsetPercent%), 仅把 TP 替换为传入的绝对价位
+void PlaceOrderWithAbsoluteTP(double r, double tpPrice)
+  {
+   int dir = Dir();
+   if(dir == DIR_FLAT)
+     {
+      Alert("[FibLimitAssist] 区间未定义：1.00 与 0.00 重合，无法下单");
+      return;
+     }
+
+   double entry = LevelPrice(r);
+   double range = MathAbs(g_p0 - g_p1);
+   double sl;
+
+   if(dir == DIR_UP)
+     {
+      if(entry > g_p0) { Alert("[FibLimitAssist] 买单入场价高于 0.00 高点，拒绝下单"); return; }
+      sl = g_p1 - range * InpSL_OffsetPercent / 100.0;
+      if(sl >= entry) { Alert("[FibLimitAssist] 买单止损价不低于入场价，拒绝下单"); return; }
+     }
+   else
+     {
+      if(entry < g_p0) { Alert("[FibLimitAssist] 卖单入场价低于 0.00 低点，拒绝下单"); return; }
+      sl = g_p1 + range * InpSL_OffsetPercent / 100.0;
+      if(sl <= entry) { Alert("[FibLimitAssist] 卖单止损价不高于入场价，拒绝下单"); return; }
+     }
+
+   // v1.80: TP 方向校验 — 必须位于 entry 的盈利侧 (0.19 线被用户拖动 0.79 越过时会触发)
+   if(dir == DIR_UP  && tpPrice <= entry) { Alert("[FibLimitAssist] 买单 TP=0.19 不高于入场价, 拒绝下单"); return; }
+   if(dir == DIR_DOWN && tpPrice >= entry) { Alert("[FibLimitAssist] 卖单 TP=0.19 不低于入场价, 拒绝下单"); return; }
+
+   double lot = CalcLot(entry, sl);
+   double volMin = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   if(lot < volMin)
+     {
+      Alert("[FibLimitAssist] 计算手数 ", DoubleToString(lot, InpLotDecimals),
+            " 小于品种最小手数 ", DoubleToString(volMin, InpLotDecimals), "，拒绝下单");
+      return;
+     }
+
+   SendLimitOrder(dir, entry, sl, tpPrice, lot);
   }
 
 //---------------------------- 市价下单 -----------------------------//

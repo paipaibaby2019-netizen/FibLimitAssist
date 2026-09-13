@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.82"
-#property description "半自动斐波那契限价下单辅助 (v1.82)"
+#property version   "1.83"
+#property description "半自动斐波那契限价下单辅助 (v1.83)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -21,6 +21,7 @@
 #property description "v1.80 0.79 挂单 TP 改为 0.19 装饰线位置 (原 3:1 RR); 新增 PlaceOrderWithAbsoluteTP, SL 公式不变, 加 TP 方向校验 (防 0.79 拖过 0.19)"
 #property description "v1.81 FVG 右侧新增 FILL 按钮 (切换 status=2 填补态显隐, 默认 OFF), 与 InpFVG_ShowFilled AND 关系; 新增 g_fillShown 全局, UpdateFillButton 同步文字/颜色"
 #property description "v1.82 InpFVG_ShowFilled 默认 false→true (主开关默认开, FILL 按钮仍默认 OFF); EVEN/CHALF/CALL 从顶部第二排移到 0.49 挂单线, X 不变, Y=screenY(0.49)-UI(11) 让线穿按钮中"
+#property description "v1.83 FVG/FILL 按钮合并为单按钮 3 状态循环: FVG(只显 U/P) → FILL(再显完全填补) → OFF(全隐藏) → FVG; 删除 g_fillShown/FillButtonName/UpdateFillButton, 新增 g_fvgState 状态机 + AdvanceFVGState; FVG 与 RISK 位置对调 (新顺序 HIDE→FVG→RISK), 三按钮宽 80 与 HIDE 对齐"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -155,10 +156,11 @@ input int                InpFVG_MinPoints        = 0;         // [FVG] 最小缺
 // FVG 按钮 (与 HIDE 同色组, sticky 行为)
 #define CLR_FVG_OFF          C'120,120,120'   // SHOW (浅灰)
 #define CLR_FVG_ON           C'200,120,20'    // OFF 状态 (橙黄警示, 与 CLR_HIDE_ON 同)
-// v1.81: FILL 按钮颜色 (运行时切换填补态显隐, 默认 OFF=隐藏)
-//   CLR_FILL_OFF: 当前隐藏填补态 (浅灰, 与 FVG OFF 态区分 — FVG 按下=FILL 不可见, FILL 按下=FILL 启用)
-//   CLR_FILL_ON:  当前显示填补态 (青蓝, 与 FVG CLR_FILL_ON 错开, 让按钮状态视觉清晰)
-#define CLR_FILL_OFF         C'100,100,100'
+// v1.83: FILL 状态颜色 — 复用 CLR_FILL_ON (原 v1.81 FILL ON 颜色), 3 态循环用现有色组即可
+//   state=0 (FVG)  → CLR_FVG_OFF   浅灰 (默认态, 只显 U/P)
+//   state=1 (FILL) → CLR_FILL_ON   青蓝 (显示 U/P + F)
+//   state=2 (OFF)  → CLR_FVG_ON    橙黄 (全隐藏)
+//   CLR_FILL_OFF (旧浅灰态) 与 CLR_FVG_OFF 重复, v1.83 删除
 #define CLR_FILL_ON          C'60,160,200'
 
 // v1.24 新增：STEP 上下调整按钮配色 (浅灰背景 + 黑字, 区别于其他深色操作按钮, 视觉更轻)
@@ -220,11 +222,13 @@ int      g_waveDir = DIR_FLAT;        // DIR_UP=上涨(绿线), DIR_DOWN=下跌(
 //   g_fvgEnabled: FVG 按钮 sticky 状态 (与 HIDE 同步隐藏/显示)
 //   g_higherTF:   Auto 模式实际生效的高级周期 (OnInit 时根据 _Period 自动选)
 //   g_fvgCache:   缓存上一帧的状态/边界, 减少 ObjectSetInteger 调用
-bool              g_fvgEnabled    = true;                       // FVG 显示开关 (默认开)
-// v1.81: FILL 按钮 — 运行时切换已被填补 FVG (status=2) 的显隐
-//   与 InpFVG_ShowFilled AND 关系: 必须两者都为 true 才显示填补态
-//   默认 false → 即使 InpFVG_ShowFilled=true 也不显示, 用户点 FILL 才打开
-bool              g_fillShown     = false;                       // FILL 按钮 sticky 状态 (默认 OFF=隐藏填补态)
+// v1.83: FVG 单按钮 3 状态循环 — 取代 v1.81 的 g_fvgEnabled + g_fillShown 双 bool
+//   状态机: 0 (FVG, 只显 U/P) → 1 (FILL, 显 U/P + F) → 2 (OFF, 全隐藏) → 0
+//   派生 bool (供 UpdateFVGDisplay 等内部使用):
+//     g_fvgEnabled = (state != 2)        // state 0/1 都启用 FVG 绘制
+//     g_fillShown  = (state == 1)        // 仅 state 1 显示填补态
+//   默认 state=0 (FVG, U/P 可见, F 隐藏) — 等价于 v1.82 的 g_fvgEnabled=true && g_fillShown=false
+int               g_fvgState       = 0;
 ENUM_TIMEFRAMES   g_higherTF      = PERIOD_H1;             // 实际生效的高级周期
 // FVG 单条记录 (检测 + 状态 紧凑存储)
 //   formTime= 形成时间 (中间 K 线时间), top= 上边界, bot= 下边界, status=0/1/2, dir=DIR_UP/DOWN
@@ -436,10 +440,11 @@ string StopName()          { return g_prefix + "STOP"; }
 string RatioAName()        { return g_prefix + "RATIO_A"; }
 string RatioBName()        { return g_prefix + "RATIO_B"; }
 string RatioCName()        { return g_prefix + "RATIO_C"; }
-// v1.45: FVG 切换按钮对象名 (sticky: 文字 "FVG"/"OFF", 按下=当前 FVG 关闭)
+// v1.45: FVG 切换按钮对象名
+//   v1.83 起升级为 3 状态循环按钮 (state: 0=FVG, 1=FILL, 2=OFF)
+//   MQL5 OBJ_BUTTON 的 STATE 只支持 bool, 但 3 状态通过 OBJPROP_TEXT/BGCOLOR 切换文字+颜色实现 (点 1 次 state++ % 3)
 string FVGButtonName()     { return g_prefix + "FVG_BTN"; }
-// v1.81: FILL 切换按钮对象名 (sticky: 文字 "FILL"/"OFF", 按下=当前隐藏填补态, 默认 OFF)
-string FillButtonName()    { return g_prefix + "FILL_BTN"; }
+// v1.81: FILL 切换按钮对象名 (sticky: 文字 "FILL"/"OFF", 按下=当前隐藏填补态, 默认 OFF) — v1.83 删除 (合并入 FVGButtonName)
 // FVG 矩形对象名前缀 (矩形本体 + 标签 — 都要按此前缀清理)
 string FVGPrefix()         { return g_prefix + "FVG_"; }
 // 隐藏/显示按钮对象名 (始终显示，不会随 g_hidden 隐藏)
@@ -541,11 +546,14 @@ void CreateObjects()
    CreateActionButton(MarketName(),        110, "MARKET",        C'140,140,140',"市价下单（止损 = 1.00 ± Range×1%，盈亏比 1:1）");
    CreateActionButton(StopName(),          110, "STOP",          CLR_FLAT_BG,    "突破挂单: BUY STOP (long) 挂在最新已收线 K 线 High + 1 tick, SELL STOP (short) 挂在最新已收线 K 线 Low - 1 tick (v1.73 与 fib 线条解耦); SL/TP/lot 与 MARKET 共用公式");
    CreateActionButton(HideName(),           80, "HIDE",          CLR_HIDE_OFF,   "隐藏/显示 EA 全部线条与按钮（此按钮自身始终显示）");
-   // v1.45: FVG 切换按钮 (在 HIDE 右侧, sticky 行为, 文字 FVG/OFF, 默认开)
-   CreateActionButton(FVGButtonName(),      80, "FVG",           CLR_FVG_OFF,    "切换 FVG 矩形显示 (公允价值缺口): OFF=隐藏, FVG=显示 (上涨浅绿 / 下跌浅红 / 完全填补浅灰; v1.58 不再区分未填补与部分填补)");
-   // v1.81: FILL 切换按钮 (在 FVG 右侧, sticky 行为, 文字 FILL/OFF, 默认 OFF=隐藏填补态)
-   //   仅控制 status=2 (完全填补) 的显隐, 与 InpFVG_ShowFilled AND 关系 — 输入参数仍保留作主开关
-   CreateActionButton(FillButtonName(),     80, "OFF",           CLR_FILL_OFF,   "切换 FVG 完全填补态 (status=2) 显示: OFF=隐藏, FILL=显示 (需 InpFVG_ShowFilled=true); 输入参数 InpFVG_ShowFilled 仍控制填补态主开关");
+   // v1.45: FVG 切换按钮 (在 HIDE 右侧, sticky 行为)
+   //   v1.83: 升级为 3 状态循环 (FVG → FILL → OFF → FVG)
+   //   文字/颜色由 UpdateFVGButton 根据 g_fvgState 派生:
+   //     state=0 (FVG)  → 文字 "FVG",  底色 CLR_FVG_OFF 浅灰
+   //     state=1 (FILL) → 文字 "FILL", 底色 CLR_FILL_ON  青蓝
+   //     state=2 (OFF)  → 文字 "OFF",  底色 CLR_FVG_ON  橙黄
+   //   v1.81 FILL 按钮已合并入本按钮, 不再单独创建
+   CreateActionButton(FVGButtonName(),      80, "FVG",           CLR_FVG_OFF,    "FVG 切换 (3 态循环): FVG=只显未/部分填补 (绿/红), FILL=再显完全填补 (灰, 需 InpFVG_ShowFilled=true), OFF=全隐藏");
 
    // v1.08：MKT 两侧的实时盈亏数字标签（OBJ_LABEL 像素定位）
    CreatePnLLabel(PnLLeftName());
@@ -1130,29 +1138,23 @@ void UpdateBottomButtons()
    // v1.64: 从顶部撤回 (v1.63 移到顶部 CANCEL 右侧, 验证后用户改回原方案) — 恢复到底部左侧
    int stepBox = UI(STEP_BTN_X) + (UI(STEP_BTN_W) + UI(STEP_BTN_GAP)) + UI(STEP_BTN_W); // 缩放后的 STEP 列右边缘
    int xHide   = stepBox + UI(8);                                 // HIDE 左 X
-   int xRisk   = xHide + UI(80) + UI(4);                          // RISK 左 X
+   int xFVG    = xHide + UI(80) + UI(4);                          // v1.83: FVG 左 X (对调前是 RISK 位)
+   int xRisk   = xFVG  + UI(80) + UI(4);                          // v1.83: RISK 左 X (对调到最右, FVG 之后)
    if(ObjectFind(0, HideName()) >= 0)
      {
       ObjectSetInteger(0, HideName(), OBJPROP_XDISTANCE, xHide);
       ObjectSetInteger(0, HideName(), OBJPROP_YDISTANCE, yBtn);
      }
+   // v1.83: FVG/RISK 位置对调 — FVG 移到原 RISK 位 (紧贴 HIDE 右侧), RISK 移到 FVG 原位 (最右)
+   if(ObjectFind(0, FVGButtonName()) >= 0)
+     {
+      ObjectSetInteger(0, FVGButtonName(), OBJPROP_XDISTANCE, xFVG);
+      ObjectSetInteger(0, FVGButtonName(), OBJPROP_YDISTANCE, yBtn);
+     }
    if(ObjectFind(0, RiskName()) >= 0)
      {
       ObjectSetInteger(0, RiskName(), OBJPROP_XDISTANCE, xRisk);
       ObjectSetInteger(0, RiskName(), OBJPROP_YDISTANCE, yBtn);
-     }
-   // v1.45: FVG 按钮 — RISK 右侧 4px, 与 RISK 同 80 宽
-   // v1.64: 同 HIDE/RISK 一起从顶部撤回 (v1.63 错方案)
-   if(ObjectFind(0, FVGButtonName()) >= 0)
-     {
-      ObjectSetInteger(0, FVGButtonName(), OBJPROP_XDISTANCE, xRisk + UI(80) + UI(4));
-      ObjectSetInteger(0, FVGButtonName(), OBJPROP_YDISTANCE, yBtn);
-     }
-   // v1.81: FILL 按钮 — FVG 右侧 4px, 与 FVG 同 80 宽
-   if(ObjectFind(0, FillButtonName()) >= 0)
-     {
-      ObjectSetInteger(0, FillButtonName(), OBJPROP_XDISTANCE, xRisk + UI(80) + UI(4) + UI(80) + UI(4));
-      ObjectSetInteger(0, FillButtonName(), OBJPROP_YDISTANCE, yBtn);
      }
 
    // 中间 MKT
@@ -1258,38 +1260,42 @@ void UpdateStopButton(int dir)
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
   }
 
-// v1.45: FVG 按钮文字 + 颜色 + sticky 状态 (与 HIDE 同模式: 开=文字"FVG"+浅灰+弹起, 关=文字"OFF"+橙黄+按下)
-// v1.48: 自愈 — 按钮若不存在 (v1.45/1.46/1.47 旧版本误删过), 自动重建
+// v1.45: FVG 切换按钮文字/颜色/sticky 同步
+// v1.83: 升级为 3 状态循环 — 文字 + 颜色 + sticky 都由 g_fvgState 派生
+//   state=0 (FVG)  → "FVG"  文字, CLR_FVG_OFF 浅灰, sticky=false (不按下, 表示当前启用)
+//   state=1 (FILL) → "FILL" 文字, CLR_FILL_ON  青蓝, sticky=false
+//   state=2 (OFF)  → "OFF"  文字, CLR_FVG_ON  橙黄, sticky=true  (按下, 表示当前关闭)
+// MQL5 OBJ_BUTTON 的 STATE 只支持 bool (按下/不按下), 这里 STATE 用作 "state=2 时高亮提示" 信号
 void UpdateFVGButton()
   {
    string name = FVGButtonName();
    if(ObjectFind(0, name) < 0)
      {
       CreateActionButton(name, 80, "FVG", CLR_FVG_OFF,
-                         "切换 FVG 矩形显示 (公允价值缺口): OFF=隐藏, FVG=显示 (上涨浅绿 / 下跌浅红 / 完全填补浅灰; v1.58 不再区分未填补与部分填补; v1.59 FVG 完全独立于 HIDE)");
+                         "FVG 切换 (3 态循环): FVG=只显未/部分填补 (绿/红), FILL=再显完全填补 (灰, 需 InpFVG_ShowFilled=true), OFF=全隐藏");
       if(ObjectFind(0, name) < 0) return;
      }
-   ObjectSetString(0, name, OBJPROP_TEXT, g_fvgEnabled ? "FVG" : "OFF");
-   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, g_fvgEnabled ? CLR_FVG_OFF : CLR_FVG_ON);
-   ObjectSetInteger(0, name, OBJPROP_STATE, !g_fvgEnabled);  // sticky: 按下=当前关闭
+   string text;
+   color  bg;
+   bool   sticky;
+   if(g_fvgState == 0)      { text = "FVG";  bg = CLR_FVG_OFF;   sticky = false; }
+   else if(g_fvgState == 1) { text = "FILL"; bg = CLR_FILL_ON;   sticky = false; }
+   else                     { text = "OFF";  bg = CLR_FVG_ON;    sticky = true;  }
+   ObjectSetString (0, name, OBJPROP_TEXT,    text);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
+   ObjectSetInteger(0, name, OBJPROP_STATE,   sticky);
    // v1.59: FVG 按钮完全独立于 HIDE — 不再跟随 g_hidden 切换 OBJPROP_HIDDEN
    //   (由 ApplyHidden 跳过 FVG 按钮保证 — HIDE 时按钮位置/可见性不变)
   }
 
-// v1.81: FILL 按钮 — 同步文字/颜色/sticky 状态
-//   文字: g_fillShown=true 显示 "FILL", false 显示 "OFF"
-//   颜色: 显示态=CLR_FILL_ON (青蓝), 隐藏态=CLR_FILL_OFF (浅灰)
-//   sticky: 按下=当前 OFF (隐藏填补态)
-//   与 FVG 按钮类似, ApplyHidden 跳过此按钮 (HIDE 时按钮位置不变)
-void UpdateFillButton()
+// v1.83: 状态机前进 — 点击 FVG 按钮时调用, state = (state + 1) % 3
+//   v1.81 双 bool 时代的翻转逻辑 (g_fvgEnabled = !g_fvgEnabled; g_fillShown = !g_fillShown) 替换为单状态机循环
+void AdvanceFVGState()
   {
-   string name = FillButtonName();
-   if(ObjectFind(0, name) < 0) return;
-   bool eff = g_fillShown && InpFVG_ShowFilled;   // 实际可见性 = 按钮态 AND 输入参数
-   ObjectSetString(0, name, OBJPROP_TEXT, eff ? "FILL" : "OFF");
-   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, eff ? CLR_FILL_ON : CLR_FILL_OFF);
-   ObjectSetInteger(0, name, OBJPROP_STATE, !eff);  // sticky: 按下=当前关闭
-   // 视觉提示: 若 InpFVG_ShowFilled=false, FILL 按钮即使 ON 也不显示矩形 — 用灰色 (CLR_FILL_OFF) 视觉提醒
+   g_fvgState = (g_fvgState + 1) % 3;
+   UpdateFVGButton();       // 同步按钮文字/颜色/sticky
+   UpdateFVGDisplay();      // 立即重绘: OFF 时清空矩形, FVG/FILL 时绘制
+   ChartRedraw(0);
   }
 
 // v1.45: ENUM_TIMEFRAMES → 分钟数 (用于 FVG 标签时间显示, 不支持范围返回 0)
@@ -1505,8 +1511,10 @@ string FVGLblName(datetime formTime, int tfMin)
 //   未成熟 FVG: 中间 K 线 = shift 0 (当前未收线), formTime 用最近已收线 K 线 + 1 个 TF 周期估算
 void UpdateFVGDisplay()
   {
-   // v1.59: 仅由 g_fvgEnabled 控制, 不再受 g_hidden 影响 — HIDE 隐藏主 fib UI, 但 FVG 仍显示
-   if(!g_fvgEnabled)
+   // v1.83: 仅由 g_fvgState 控制 — state=2 (OFF) 时清空矩形, state 0/1 渲染
+   //   v1.59 旧逻辑 "仅由 g_fvgEnabled 控制" 已替换为状态机: g_fvgEnabled = (state != 2)
+   //   仍不受 g_hidden 影响 — HIDE 隐藏主 fib UI, 但 FVG 仍显示
+   if(g_fvgState == 2)
      {
       // v1.48: 关闭 → 仅清掉 FVG 矩形 (FVG_R_*) + 状态标签 (FVG_L_*)
       //   不能用 FVG_ 前缀过滤, 因为 FVG_BTN 按钮也是 FVG_ 前缀, 误删按钮 → "点一次消失" bug
@@ -1580,10 +1588,11 @@ void UpdateFVGDisplay()
    // 绘制 / 更新
    for(int i = 0; i < allN; i++)
      {
-      // v1.81: status=2 (完全填补) 同时受 InpFVG_ShowFilled 和 g_fillShown (FILL 按钮) 控制 — AND 关系
+      // v1.83: status=2 (完全填补) 同时受 InpFVG_ShowFilled 和 g_fvgState==1 (FILL 按钮 FILL 态) 控制 — AND 关系
+      //   旧 v1.81 用 g_fillShown bool, v1.83 改用 g_fvgState==1 (FILL 态) 等价表达
       bool show = (all[i].status == 0 && InpFVG_ShowUnfilled)
                 || (all[i].status == 1 && InpFVG_ShowPartial)
-                || (all[i].status == 2 && InpFVG_ShowFilled && g_fillShown);
+                || (all[i].status == 2 && InpFVG_ShowFilled && (g_fvgState == 1));
       string rectName = FVGObjName(all[i].formTime, all[i].tfMin);
       string lblName  = FVGLblName (all[i].formTime, all[i].tfMin);
 
@@ -1714,7 +1723,7 @@ void ApplyHidden()
    int total = ObjectsTotal(0, -1, -1);
    string hideObj = HideName();
    string fvgBtn  = FVGButtonName();
-   string fillBtn = FillButtonName();   // v1.81: FILL 按钮 — 同样独立于 HIDE
+   // v1.83: 删除 FillButtonName() — FILL 按钮已合并入 FVG 按钮, 不再独立
    for(int i = 0; i < total; i++)
      {
       string name = ObjectName(0, i, -1, -1);
@@ -1725,8 +1734,8 @@ void ApplyHidden()
       //   FVG 标签: 仍可见
       //   与波段线 (FLAW_ 独立前缀) 设计意图一致 — FVG 也是"独立于主 fib UI 的辅助图层"
       // v1.81: FILL 按钮同样独立于 HIDE — FVG 按钮的辅助开关, HIDE 不应影响
+      // v1.83: FILL 按钮已合并入 FVG 按钮, 这里只跳过 fvgBtn 一个
       if(name == fvgBtn
-      || name == fillBtn
       || StringFind(name, g_prefix + "FVG_R_") == 0
       || StringFind(name, g_prefix + "FVG_L_") == 0)
          continue;
@@ -1788,8 +1797,7 @@ void RefreshAll()
    UpdateStopButton(dir);   // v1.31: 突破挂单按钮文字与配色跟随方向
    UpdateRiskButton();
    UpdateHideButton();
-   UpdateFVGButton();       // v1.45: FVG 切换按钮文字 + 颜色 + sticky 状态
-   UpdateFillButton();      // v1.81: FILL 切换按钮文字 + 颜色 + sticky 状态 (与 FVG 按钮同步)
+   UpdateFVGButton();       // v1.83: 单按钮 3 态循环 (FVG→FILL→OFF), 替代 v1.81 独立的 UpdateFillButton
    UpdateTopButtons();
    UpdateBottomButtons();
    UpdatePnLDisplay();   // v1.08：MKT 两侧的实时盈亏数字
@@ -3833,23 +3841,12 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
         }
       if(sparam == FVGButtonName())
         {
-         g_fvgEnabled = !g_fvgEnabled;
-         UpdateFVGButton();   // 同步文字/颜色/sticky 状态
-         if(!g_fvgEnabled) UpdateFVGDisplay();   // 关闭时立即清空矩形
-         else               { g_dirty = true; }   // 开启时下次 RefreshAll 重建 (OnTick 检测 g_dirty → 走 RefreshAll)
-         ChartRedraw(0);
+         AdvanceFVGState();   // v1.83: 状态机前进 (FVG→FILL→OFF→FVG), 替代 v1.81 双 bool 翻转
          return;
         }
       // v1.81: FILL 按钮 — 切换填补态 (status=2) 显隐
       //   与 InpFVG_ShowFilled AND 关系: 用户点 ON 但输入参数 false → 按钮显示蓝色但无矩形 (UpdateFillButton 灰色提示)
-      if(sparam == FillButtonName())
-        {
-         g_fillShown = !g_fillShown;
-         UpdateFillButton();   // 同步文字/颜色/sticky 状态
-         UpdateFVGDisplay();   // 立即重绘: ON 时显示填补态矩形, OFF 时清空
-         ChartRedraw(0);
-         return;
-        }
+      // v1.83: FILL 按钮已合并入 FVG 按钮 (单按钮 3 态循环), 这里删除独立分支
 
       // v1.17: STEP 按钮 (UP/DOWN) — 解析名称 → ApplyStepButton
       if(StringFind(sparam, g_prefix + "STEP_") == 0)

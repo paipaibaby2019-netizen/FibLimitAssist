@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.74"
-#property description "半自动斐波那契限价下单辅助 (v1.74)"
+#property version   "1.75"
+#property description "半自动斐波那契限价下单辅助 (v1.75)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -13,6 +13,8 @@
 #property description "v1.40+ 信号提醒: 强弱回调/反弹形态评分 + Alert推送 + 波段画线(独立于信号,InpWaveLineEnabled)"
 #property description "v1.50-v1.59 修复详情见项目说明文档第 13 章 (描述符总数受限, 变更记录仅保留概要)"
 #property description "v1.61 顶部按钮左对齐链: LONG→ADJUST→CANCEL 类似底部 HIDE→RISK→FVG 链, stepBox+8/92/176 递进"
+#property description "v1.74 MKT+STP 横向相邻 4px 整体居中 (替代原 MARKET 居中 + STOP 上下排), LONG/SHORT 统一 STP 在 MKT 右边"
+#property description "v1.75 MKT 与 STP 中间新增实时点差标签 (1.5), gap 从 4px 扩到 40px 容纳可读文字, OBJ_LABEL ANCHOR_CENTER_UPPER 居中显示"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -408,6 +410,8 @@ string PnLLeftName()       { return g_prefix + "PNLL"; }
 string PnLRightName()      { return g_prefix + "PNLR"; }
 // 风险切换按钮对象名
 string RiskName()          { return g_prefix + "RISK"; }
+// v1.75: MKT 与 STP 之间的实时点差标签 (形如 "(1.5)")
+string SpreadName()        { return g_prefix + "SPREAD"; }
 // 市价下单按钮对象名
 string MarketName()        { return g_prefix + "MARKET"; }
 // v1.31：突破挂单按钮对象名 (BUY STP / SELL STP)
@@ -529,6 +533,8 @@ void CreateObjects()
    CreatePnLLabel(RatioAName());
    CreatePnLLabel(RatioBName());
    CreatePnLLabel(RatioCName());
+   // v1.75: MKT 与 STP 中间的实时点差标签 (形如 "(1.5)" — 单位 points/10=pips)
+   CreateSpreadLabel(SpreadName());
 
    CreateLabelRight(LName(RATIO_021), "0.21", CLR_DECO);
 
@@ -545,6 +551,21 @@ bool CreatePnLLabel(string name)
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
    ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   return true;
+  }
+// v1.75: MKT 与 STP 中间的实时点差标签 (形如 "(1.5)") — 居中锚点, 颜色用 PNL_NEUTRAL 灰避免抢眼
+bool CreateSpreadLabel(string name)
+  {
+   if(ObjectFind(0, name) >= 0) return true;
+   if(!ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0)) return false;
+   ObjectSetString(0, name, OBJPROP_TEXT, "");
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Font(7));
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER_UPPER);  // X/Y 都居中: X=gap 中心, Y=yBtn 顶端
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, CLR_PNL_NEUTRAL);
    return true;
   }
 
@@ -1050,6 +1071,9 @@ void UpdateTopButtons()
 //   v1.32-v1.73 是 MARKET 居中 + STOP 在 MARKET 正下方 (上下排)
 //   现在 MKT 和 STP 同 Y (yBtn), STP 在 MKT 右边 4px, 整体 (224px) 关于图表中心左右对称
 //   LONG/SHORT 模式统一: STP 永远在 MKT 右边 (用户对两种方向要求一致)
+// v1.75: 中间新增实时点差标签 (形如 "(1.5)"), 因此 gap 从 UI(4) 扩大到 UI(40) 容纳 ~30px 标签宽度
+//   整体宽度 110+40+110=260 关于图表中心 w/2 左右对称; spread 标签用 ANCHOR_CENTER_UPPER 居中到 gap 几何中心
+//   (gap 扩大的取舍: 与 v1.74 的 "4px" 紧贴布局冲突, 但 4px 无法容纳可读文字, 用户的 "在中间加数字" 优先)
 void UpdateBottomButtons()
   {
    double botPrice = MathMin(g_p1, g_p0);
@@ -1058,12 +1082,15 @@ void UpdateBottomButtons()
    int yBtn = y - UI(26); if(yBtn < 0) yBtn = 0;
    int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
 
-   // v1.74: MKT(110) + 4px 间隔 + STP(110) = 224 整体, 关于 w/2 左右对称
+   // v1.75: MKT(110) + 40px 间隔(放点差标签) + STP(110) = 260 整体, 关于 w/2 左右对称
+   //   v1.74 gap=UI(4) → v1.75 gap=UI(40), 因新增 spread 标签需要可读空间
    int marketW  = UI(110);
-   int pairW    = marketW + UI(4) + marketW;
+   int gapW     = UI(40);
+   int pairW    = marketW + gapW + marketW;
    int pairLeft = (w - pairW) / 2;
    int marketX  = pairLeft;
-   int stopX    = pairLeft + marketW + UI(4);
+   int stopX    = pairLeft + marketW + gapW;
+   int spreadX  = pairLeft + marketW + gapW / 2;   // gap 几何中心, ANCHOR_CENTER_UPPER 居中
 
    // 左侧 HIDE / RISK
    // v1.22: HIDE / RISK 右移到 STEP 按钮 (X=[6, 52]) 右侧, 避免 long 模式
@@ -1121,10 +1148,18 @@ void UpdateBottomButtons()
 
    // v1.74: STOP 与 MKT 横向相邻 (右边 4px), 同 Y (yBtn) — 不再上下排
    //   v1.32-v1.73 是在 MARKET 正下方 y + UI(4); 现在统一到 yBtn (与 MKT 同高)
+   // v1.75: gap 从 4px 扩到 40px (见函数头注释), STP 仍在 MKT 右边, 整体居中
    if(ObjectFind(0, StopName()) >= 0)
      {
       ObjectSetInteger(0, StopName(), OBJPROP_XDISTANCE, stopX);
       ObjectSetInteger(0, StopName(), OBJPROP_YDISTANCE, yBtn);
+     }
+
+   // v1.75: 点差标签 — gap 几何中心, 与 MKT/STP 同 Y (yBtn + 4 与 P/L 标签同高)
+   if(ObjectFind(0, SpreadName()) >= 0)
+     {
+      ObjectSetInteger(0, SpreadName(), OBJPROP_XDISTANCE, spreadX);
+      ObjectSetInteger(0, SpreadName(), OBJPROP_YDISTANCE, yBtn + UI(4));
      }
   }
 
@@ -1700,6 +1735,7 @@ void RefreshAll()
    UpdateBottomButtons();
    UpdatePnLDisplay();   // v1.08：MKT 两侧的实时盈亏数字
    UpdateRatioLabels();  // v1.34：底线下方的盈亏比三指标 (浮盈占比/风险回报比/百分比)
+   UpdateSpreadDisplay(); // v1.75：MKT 与 STP 中间的实时点差标签 "(1.5)"
 
    UpdateLabelRight(LName(RATIO_021), TheoPrice(RATIO_021, g_p1, g_p0), "0.21");  // v1.07：仅保留 0.21 标签
 
@@ -1958,6 +1994,21 @@ void UpdatePnLDisplay()
       ObjectSetString(0, PnLRightName(), OBJPROP_TEXT, FormatPnL(d));
       ObjectSetInteger(0, PnLRightName(), OBJPROP_COLOR, PnLColor(d));
      }
+
+  }
+
+// v1.75: MKT 与 STP 之间的实时点差标签 (形如 "(1.5)") — 单位 points/10 = pips
+//   SYMBOL_SPREAD 返回当前品种点差 (单位: points), 除以 10 得 pips, 1 位小数
+//   BTCUSD 150 pts → 15.0 pips → "(15.0)"; 用户示例 "(1.5)" 暗示 pips 格式, 但 BTCUSD 通常 > 10 pips
+//   若用户反馈单位不对 (比如想要 points 形式), 再调整为 /1.0
+void UpdateSpreadDisplay()
+  {
+   long spreadPts = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   if(spreadPts < 0) spreadPts = 0;
+   double spreadPips = spreadPts / 10.0;
+   string txt = "(" + DoubleToString(spreadPips, 1) + ")";
+   if(ObjectFind(0, SpreadName()) >= 0)
+      ObjectSetString(0, SpreadName(), OBJPROP_TEXT, txt);
   }
 
 // v1.34: 盈亏比三指标 — 浮盈占比 / 风险回报比 / 百分比
@@ -3589,7 +3640,7 @@ void OnTick()
    if(bt != lastBarTime) { lastBarTime = bt; g_dirty = true; }
 
    if(g_dirty) { RefreshAll(); g_dirty = false; }
-   else        { UpdatePnLDisplay(); UpdateRatioLabels(); ChartRedraw(0); }   // v1.08 PnL + v1.35 盈亏比 — 每个 tick 都刷新, 不等新柱
+   else        { UpdatePnLDisplay(); UpdateRatioLabels(); UpdateSpreadDisplay(); ChartRedraw(0); }   // v1.08 PnL + v1.35 盈亏比 + v1.75 点差 — 每个 tick 都刷新, 不等新柱
 
    CheckSignals();      // v1.40 交易信号提醒 (内部判断开关, 关闭时零开销直接返回)
    UpdateWaveLine();    // v1.44 波段画线 (独立于信号提醒, 内部判断开关, 关闭时清理已有线)

@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.84"
-#property description "半自动斐波那契限价下单辅助 (v1.84)"
+#property version   "1.85"
+#property description "半自动斐波那契限价下单辅助 (v1.85)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -23,6 +23,7 @@
 #property description "v1.82 InpFVG_ShowFilled 默认 false→true (主开关默认开, FILL 按钮仍默认 OFF); EVEN/CHALF/CALL 从顶部第二排移到 0.49 挂单线, X 不变, Y=screenY(0.49)-UI(11) 让线穿按钮中"
 #property description "v1.83 FVG/FILL 按钮合并为单按钮 3 状态循环: FVG(只显 U/P) → FILL(再显完全填补) → OFF(全隐藏) → FVG; 删除 g_fillShown/FillButtonName/UpdateFillButton, 新增 g_fvgState 状态机 + AdvanceFVGState; FVG 与 RISK 位置对调 (新顺序 HIDE→FVG→RISK), 三按钮宽 80 与 HIDE 对齐"
 #property description "v1.84 0.79 挂单拆成两半仓: 半仓 1 TP=0.19 装饰线 (v1.80 逻辑), 半仓 2 TP=0.79→0.19 距离的 2 倍 (= 2×tp019 - entry); SL 相同, lot 各半 (总风险不变), 两笔独立挂单同 entry 触发"
+#property description "v1.85 InpUIScale 默认 0 → 1: 强制按原始尺寸 (1:1 像素) 显示所有按钮/标签, 取消 v1.27 平台自动缩小 (Windows=0.6) 的默认行为; Mac/Wine 不变, Windows 远程服务器按钮变大"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -65,7 +66,8 @@ input int InpDefaultSpanBars = 60; // [默认区间] 用最近多少根已收盘
 // v1.27 新增: UI 界面缩放系数 (统一缩放所有按钮/标签的尺寸与间距)
 //   Mac/Wine 版或 96DPI 屏幕用 1.0; 远程 Windows 服务器按钮过大时, 调小 (如 0.6~0.8)
 //   0 = 自动按平台智能默认 (mac=1.0, Windows=0.6); 其他正数 = 强制使用 (手动覆盖智能默认)
-input double InpUIScale = 0.0;   // [UI] 按钮尺寸缩放系数 (0=按平台智能默认; 正数=强制值)
+// v1.85 改: 默认 0 → 1, 强制按原始尺寸显示 (取消平台自动缩小 Windows=0.6 的行为, 按钮统一为 1:1 像素)
+input double InpUIScale = 1.0;   // [UI] 按钮尺寸缩放系数 (默认 1=原始尺寸, 0=按平台自动; 正数=强制值)
 
 // v1.28 新增: 字号独立缩放系数 (与 InpUIScale 解耦, 防止按钮缩小后文字看不清)
 //   0 = 自动按平台智能默认 (mac=1.0, Windows=1.0); 其他正数 = 强制值 (如 0.8=字小一些)

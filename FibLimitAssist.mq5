@@ -30,6 +30,7 @@
 #property description "v1.90 删除信号提醒与波段画线全部代码: 移除 InpWaveLineEnabled/InpSignal*/InpBull*/InpPullback* 等 14 个输入参数 + ENUM_SIGNAL_DIR 枚举 + 13 个函数 (IsBigBullBar/IsBigBearBar/IsTopFractal/IsBottomFractal/FindLatestWave/SignalATR/SignalTFStr/ScoreSignal/DetectBullSignal/DetectBearSignal/UpdateWaveLine/DrawWaveLine/CheckSignals) + 7 个全局变量 (g_sigLongID/g_sigShortID/g_waveT1-2/g_waveP1-2/g_waveDir) + WaveName() 函数 + OnTick/OnDeinit 调用; Williams 分形 (InpAdjust*/IsWilliamsLow/High/BuildSwingCandidates/FindNearestSwing) 与 FVG/UI/下单完全独立, 不受影响"
 #property description "v1.91 新增信号提醒 (InpSignalAlert 默认 false): 价位 = 区间顶部回撤 49% (g_p1 - 0.49×Range, 与可拖动 0.49 线解耦); 方向由 Dir() 判定 (long=等价格从上方穿越向下, short=等价格从下方穿越向上); 跨价位瞬间报警一次后锁定, 直到 p1/p0 调整或按钮重开重置; 新增 SIGNAL/OFF 切换按钮 (占用原 ADJUST 位置 — LONG 右侧 4px, 与 SWAP/CANCEL 同 Y); ADJUST 按钮改为钉在图表右下角 (右下 4px 偏移, 跟随周期切换/缩放/拖动端点线自动重新定位, 通过 ChartGetInteger CHART_WIDTH/HEIGHT_IN_PIXELS 实现, CHARTEVENT_CHART_CHANGE 设 g_dirty=true 触发 RefreshAll)"
 #property description "v1.92 修复编译错误 'InpSignalAlert constant cannot be modified': MQL5 input 是编译期常量, 运行时不能赋值; 拆成 input InpSignalAlert (启动默认值) + 运行时变量 g_signalAlert (按钮切换); OnInit 把 InpSignalAlert 拷给 g_signalAlert, ToggleSignalAlert/UpdateSignalButton/CheckPullbackSignal 全部改读 g_signalAlert"
+#property description "v1.93 修复 SIGNAL 按钮 tooltip 编译错误 (519-520 行): 用户在 MetaEditor 编译时报告 '1未能识别中文字符' 系列错误 + 'UpdateSignalButton() 意外的令牌', 怀疑 MetaEditor 对 4 行连续中文字符串字面量解析异常; 改用局部 string 变量承载多行 tooltip 后再传入 ObjectSetString (与 ADJUST 按钮的 + 拼接形成对照), 保持中文与 · 字符原样"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -512,11 +513,12 @@ bool CreateSignalButton()
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetString(0, name, OBJPROP_FONT, "Arial");
-   ObjectSetString(0, name, OBJPROP_TOOLTIP,
-                   "信号提醒 切换 (运行时): SIGNAL=开, OFF=关\n"
-                   "· 价位 = 区间顶部回撤 49% (= g_p1 - 0.49×Range, 与可拖动的 0.49 线无关)\n"
-                   "· 方向 = Dir() 自动判定 (DIR_UP=long, DIR_DOWN=short)\n"
-                   "· "首次跨价位报警一次后锁定, 直到边界调整或按钮重开");
+   // v1.93: 用局部 string 变量承载多行 tooltip, 避免 MetaEditor 对连续字符串字面量的解析报错
+   string tip = "信号提醒 切换 (运行时): SIGNAL=开, OFF=关\n"
+                "· 价位 = 区间顶部回撤 49% (= g_p1 - 0.49×Range, 与可拖动的 0.49 线无关)\n"
+                "· 方向 = Dir() 自动判定 (DIR_UP=long, DIR_DOWN=short)\n"
+                "· 首次跨价位报警一次后锁定, 直到边界调整或按钮重开";
+   ObjectSetString(0, name, OBJPROP_TOOLTIP, tip);
    UpdateSignalButton();   // 同步文字/颜色/STICKY (依据 g_signalAlert 运行时值)
    return true;
   }

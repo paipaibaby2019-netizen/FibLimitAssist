@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.93"
-#property description "半自动斐波那契限价下单辅助 (v1.93)"
+#property version   "1.94"
+#property description "半自动斐波那契限价下单辅助 (v1.94)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -31,6 +31,7 @@
 #property description "v1.91 新增信号提醒 (InpSignalAlert 默认 false): 价位 = 区间顶部回撤 49% (g_p1 - 0.49×Range, 与可拖动 0.49 线解耦); 方向由 Dir() 判定 (long=等价格从上方穿越向下, short=等价格从下方穿越向上); 跨价位瞬间报警一次后锁定, 直到 p1/p0 调整或按钮重开重置; 新增 SIGNAL/OFF 切换按钮 (占用原 ADJUST 位置 — LONG 右侧 4px, 与 SWAP/CANCEL 同 Y); ADJUST 按钮改为钉在图表右下角 (右下 4px 偏移, 跟随周期切换/缩放/拖动端点线自动重新定位, 通过 ChartGetInteger CHART_WIDTH/HEIGHT_IN_PIXELS 实现, CHARTEVENT_CHART_CHANGE 设 g_dirty=true 触发 RefreshAll)"
 #property description "v1.92 修复编译错误 'InpSignalAlert constant cannot be modified': MQL5 input 是编译期常量, 运行时不能赋值; 拆成 input InpSignalAlert (启动默认值) + 运行时变量 g_signalAlert (按钮切换); OnInit 把 InpSignalAlert 拷给 g_signalAlert, ToggleSignalAlert/UpdateSignalButton/CheckPullbackSignal 全部改读 g_signalAlert"
 #property description "v1.93 修复 SIGNAL 按钮 tooltip 编译错误 (519-520 行): 用户在 MetaEditor 编译时报告 '1未能识别中文字符' 系列错误 + 'UpdateSignalButton() 意外的令牌', 怀疑 MetaEditor 对 4 行连续中文字符串字面量解析异常; 改用局部 string 变量承载多行 tooltip 后再传入 ObjectSetString (与 ADJUST 按钮的 + 拼接形成对照), 保持中文与 · 字符原样"
+#property description "v1.94 修复 SIGNAL 按钮第一次点击无视觉反馈的 bug: ToggleSignalAlert 末尾缺少 ChartRedraw(0) 调用, UpdateSignalButton 写入的 TEXT/BGCOLOR/STATE 在 OnChartEvent 返回前不立即生效, 需等下一次 RefreshAll/ChartRedraw 才显示, 导致用户感觉第一次点击没反应 (实际 g_signalAlert 已翻转, 第二次 redraw 才把 SIGNAL 显示出来); 对比 AdvanceFVGState 直接调 ChartRedraw(0), ToggleHide 经 RefreshAll → ChartRedraw(0); 修复方案在 ToggleSignalAlert 末尾加 ChartRedraw(0), 与其他 sticky 按钮同步; 顺便在 CreateSignalButton 中显式设置 OBJPROP_STATE=false + OBJPROP_BGCOLOR=深灰, 与 CreateActionButton 初始化模式一致 (v1.93 仅靠 UpdateSignalButton 派生, 极端情况可能有视觉闪烁)"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -512,6 +513,10 @@ bool CreateSignalButton()
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Font(7));
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   // v1.94: 显式设置初始 STATE/BGCOLOR/TEXT, 与 CreateActionButton 一致 — 仅靠 UpdateSignalButton 派生在某些 MT5 启动顺序下会有视觉闪烁
+   ObjectSetInteger(0, name, OBJPROP_STATE,   false);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'90,90,90');
+   ObjectSetString (0, name, OBJPROP_TEXT,    "OFF");
    ObjectSetString(0, name, OBJPROP_FONT, "Arial");
    // v1.93: 用局部 string 变量承载多行 tooltip, 避免 MetaEditor 对连续字符串字面量的解析报错
    string tip = "信号提醒 切换 (运行时): SIGNAL=开, OFF=关\n"
@@ -769,6 +774,7 @@ void ToggleSignalAlert()
    g_prevP0           = g_p0;
    g_pullbackLevel    = (g_p1 > 0 && g_p0 > 0) ? (g_p1 - 0.49 * (g_p1 - g_p0)) : 0.0;
    UpdateSignalButton();
+   ChartRedraw(0);   // v1.94: 必须手动重绘 — AdvanceFVGState/ToggleHide 都有 (前者直接调, 后者经 RefreshAll), 这里不调导致 UpdateSignalButton 写入的 TEXT/BGCOLOR/STATE 不立即生效, 第一次点击视觉延迟到第二次才显示
    Print("[信号提醒] ", g_signalAlert ? "已启用 (价位=" + DoubleToString(g_pullbackLevel, _Digits) + ")" : "已关闭");
   }
 

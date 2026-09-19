@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.85"
-#property description "半自动斐波那契限价下单辅助 (v1.85)"
+#property version   "1.86"
+#property description "半自动斐波那契限价下单辅助 (v1.86)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -24,6 +24,7 @@
 #property description "v1.83 FVG/FILL 按钮合并为单按钮 3 状态循环: FVG(只显 U/P) → FILL(再显完全填补) → OFF(全隐藏) → FVG; 删除 g_fillShown/FillButtonName/UpdateFillButton, 新增 g_fvgState 状态机 + AdvanceFVGState; FVG 与 RISK 位置对调 (新顺序 HIDE→FVG→RISK), 三按钮宽 80 与 HIDE 对齐"
 #property description "v1.84 0.79 挂单拆成两半仓: 半仓 1 TP=0.19 装饰线 (v1.80 逻辑), 半仓 2 TP=0.79→0.19 距离的 2 倍 (= 2×tp019 - entry); SL 相同, lot 各半 (总风险不变), 两笔独立挂单同 entry 触发"
 #property description "v1.85 InpUIScale 默认 0 → 1: 强制按原始尺寸 (1:1 像素) 显示所有按钮/标签, 取消 v1.27 平台自动缩小 (Windows=0.6) 的默认行为; Mac/Wine 不变, Windows 远程服务器按钮变大"
+#property description "v1.86 新增 0.73 装饰线 (青色虚线, 不可拖动, 与 0.19 灰色虚线区分): 价格从 0.00 起占区间 73% 处的结构参考线; 用 inline 模式与 0.19 共用 CreateHLine/UpdateLabel/CreateLabelRight/UpdateLabelRight, 不抽专用函数"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -120,12 +121,14 @@ input int                InpFVG_MinPoints        = 0;         // [FVG] 最小缺
 #define RATIO_079 0.79
 #define RATIO_049 0.49
 #define RATIO_019 0.19
+#define RATIO_073 0.73   // v1.86: 0.73 装饰线 (不可拖动, 仅显示)
 #define RATIO_000 0.00
 
 //---------------------------- 颜色定义 -----------------------------//
 #define CLR_END      C'90,90,90'     // 端点 1.00 / 0.00 线
 // v1.25 删除 CLR_MID：0.79/0.49 线颜色改为随方向动态变化 (DIR_UP→CLR_BUY_BG 绿, DIR_DOWN→CLR_SELL_BG 红, DIR_FLAT→CLR_FLAT_BG 灰), 由 RefreshAll 同步
 #define CLR_DECO     C'115,115,115'  // 0.19 装饰线（加深，避免看不清）
+#define CLR_DECO_073 C'100,150,200'  // v1.86: 0.73 装饰线 (青色, 与 0.19 灰色 CLR_DECO 区分)
 #define CLR_BUY_BG   C'76,175,80'    // 买单按钮底色 (+0.79/0.49 线 long 态)
 #define CLR_SELL_BG  C'244,67,54'    // 卖单按钮底色 (+0.79/0.49 线 short 态)
 #define CLR_FLAT_BG  C'140,140,140'  // 方向未定义按钮底色 (+0.79/0.49 线未方向态)
@@ -536,6 +539,8 @@ void CreateObjects()
    CreateHLine(HName(RATIO_079), g_p79, true,  CLR_FLAT_BG, STYLE_SOLID, 1);
    CreateHLine(HName(RATIO_049), g_p49, true,  CLR_FLAT_BG, STYLE_SOLID, 1);
    CreateHLine(HName(RATIO_019), TheoPrice(RATIO_019, g_p1, g_p0), false, CLR_DECO, STYLE_DASHDOT, 1);
+   // v1.86: 0.73 装饰线 (青色虚线, 不可拖动)
+   CreateHLine(HName(RATIO_073), TheoPrice(RATIO_073, g_p1, g_p0), false, CLR_DECO_073, STYLE_DASHDOT, 1);
 
    CreateButton(BName(RATIO_079));
    CreateButton(BName(RATIO_049));
@@ -569,6 +574,8 @@ void CreateObjects()
    CreateSpreadLabel(SpreadName());
 
    CreateLabelRight(LName(RATIO_019), "0.19", CLR_DECO);
+   // v1.86: 0.73 装饰线标签
+   CreateLabelRight(LName(RATIO_073), "0.73", CLR_DECO_073);
 
    CreateStepButtons();   // v1.17: 1.00/0.79/0.49/0.00 各一对 UP/DOWN 按钮
   }
@@ -1782,6 +1789,8 @@ void RefreshAll()
    UpdateLabel(HName(RATIO_079), g_p79);
    UpdateLabel(HName(RATIO_049), g_p49);
    UpdateLabel(HName(RATIO_019), TheoPrice(RATIO_019, g_p1, g_p0));
+   // v1.86: 0.73 装饰线跟随 1.00 重定位
+   UpdateLabel(HName(RATIO_073), TheoPrice(RATIO_073, g_p1, g_p0));
 
    int dir = Dir();
    double price79 = LevelPrice(RATIO_079);
@@ -1808,6 +1817,8 @@ void RefreshAll()
    UpdateSpreadDisplay(); // v1.75：MKT 与 STP 中间的实时点差标签 "(1.5)"
 
    UpdateLabelRight(LName(RATIO_019), TheoPrice(RATIO_019, g_p1, g_p0), "0.19");  // v1.07：仅保留 0.19 标签
+   // v1.86: 0.73 装饰线标签跟随
+   UpdateLabelRight(LName(RATIO_073), TheoPrice(RATIO_073, g_p1, g_p0), "0.73");
 
    ApplyHidden();
    ChartRedraw(0);

@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.97"
-#property description "半自动斐波那契限价下单辅助 (v1.97)"
+#property version   "1.98"
+#property description "半自动斐波那契限价下单辅助 (v1.98)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -35,6 +35,7 @@
 #property description "v1.95 调整 SIGNAL 按钮配色: 开(SIGNAL)=红色 C'200,60,60' (警示色, 与 CHALF 橙红 C'230,140,40'/CALL 橙 C'200,120,20' 同一暖色系但更红更醒目), 关(OFF)=灰色 C'120,120,120' (与 CANCEL 按钮一致 — 两个按钮同处顶部第二排, 配色统一视觉不杂乱); 同步修改 CreateSignalButton 初始化 BGCOLOR 和 UpdateSignalButton 三元表达式; 配色方案在 CLAUDE.md/SKILL 中没指定具体 RGB, 我选了红偏暗 (R=200) 而非纯红 clrRed (R=255) 避免太刺眼, 与其他按钮饱和度一致"
 #property description "v1.96 按用户要求统一按钮配色: ① SIGNAL 开状态由红 C'200,60,60' 改为黄 C'255,193,7' (直接复用 RISK 1% 的 CLR_RISK_MID, 暖色系提示监控中); ② EVEN/CHALF/CALL 三个仓位管理按钮由 蓝/橙红/橙 全部改为灰 C'120,120,120' (与 CANCEL 一致 — 5 个顶部按钮[CANCEL/CALL/CHALF/EVEN]全灰形成中性背景组, RISK/SIGNAL 用黄高亮突出当前档位/状态); 同步 CreateActionButton 三处 BGCOLOR 参数 + UpdateSignalButton 三元表达式的 SIGNAL 颜色"
 #property description "v1.97 缩短仓位按钮文字 + 统一宽度: ① CALL 文字 → 'all', 宽 100→80 (与 EVEN 同宽); ② CHALF 文字 → 'half', 宽 80 不变; 顶部第二排三按钮 (EVEN/half/all) 宽全 80 — 但 X 计算早用 UI(80) 算 (v1.67 已统一), 实际位置不变, 仅 'all' 右沿缩进 20px (stepBox+256 → 比 v1.96 短 20px); g_btnX = w-UI(108) 不动, 仍作挂单列/盈亏比标签右对齐锚点 (该值与 CALL 实际宽度解耦, 因为 v1.65 起 CALL 位置按 stepBox 算而非按图表宽); 同步注释 UpdateButtonX / UpdateTopButtons 中 CALL 宽度的历史说明"
+#property description "v1.98 仓位按钮文字全部大写: 'all' → 'ALL', 'half' → 'HALF' (与 CANCEL/EVEN/RISK/HIDE 等其他按钮大小写风格保持一致 — 之前小写是为短文字配窄宽 80 节省视觉空间, 但用户反馈希望与 EVEN 等已有大写按钮对齐, 风格统一); 宽度仍 80 不变; tooltip 中文不受影响"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -566,8 +567,8 @@ void CreateObjects()
    CreateAdjustButton();   // v1.13: ADJUST 按钮 (位置由 UpdateAdjustButton 跟随 SWAP 设置)
    CreateSignalButton();  // v1.91: 信号提醒开关按钮 (位置由 UpdateSignalButtonPosition 设在原 ADJUST 位)
    CreateActionButton(CancelPendingName(), 100, "CANCEL",       C'120,120,120', "取消当前品种全部挂单（含手动单），不影响其他品种");
-   CreateActionButton(CloseAllName(),       80, "all",          C'120,120,120',  "平掉当前品种全部持仓（不涉及挂单），不影响其他品种");   // v1.97: 宽 100→80 (同 EVEN), 文字 "CALL"→"all"
-   CreateActionButton(CloseHalfName(),      80, "half",         C'120,120,120',  "按手数砍半平仓当前品种持仓；若砍半后 < 最小手数则全平该仓位");   // v1.97: 文字 "CHALF"→"half"
+   CreateActionButton(CloseAllName(),       80, "ALL",           C'120,120,120',  "平掉当前品种全部持仓（不涉及挂单），不影响其他品种");   // v1.98: 文字 "all"→"ALL" (大写)
+   CreateActionButton(CloseHalfName(),      80, "HALF",          C'120,120,120',  "按手数砍半平仓当前品种持仓；若砍半后 < 最小手数则全平该仓位");   // v1.98: 文字 "half"→"HALF" (大写)
    CreateActionButton(EvenName(),           80, "EVEN",          C'120,120,120',  "一键入场价（仅当前品种）：盈利仓位SL改到入场；亏损仓位TP改到入场（保本平仓）");   // v1.96: 蓝 → 灰
    CreateActionButton(RiskName(),           80, "",              C'90,90,90',   "点击循环切换单笔风险档位：0.5% → 1% → 2% → 0.5%");
    CreateActionButton(MarketName(),        110, "MARKET",        C'140,140,140',"市价下单（止损 = 1.00 ± Range×1%，盈亏比 1:1）");

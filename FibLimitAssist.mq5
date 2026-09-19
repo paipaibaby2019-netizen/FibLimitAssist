@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.90"
-#property description "半自动斐波那契限价下单辅助 (v1.90)"
+#property version   "1.91"
+#property description "半自动斐波那契限价下单辅助 (v1.91)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -28,6 +28,7 @@
 #property description "v1.88 InpUIScale 默认 1 → 0: 恢复 v1.27 的平台自动智能默认 (Windows=0.6 自动缩小到 60%, Mac/Wine=1.0 原始尺寸); 取消 v1.85 强制 1:1 原始像素, Windows 远程服务器按钮回归较小尺寸"
 #property description "v1.89 取消 Windows=0.6 平台默认: defaultUIScale 统一 1.0 (Windows 和 Wine/mac 一律按原始 1:1 像素), 删除 isWindows 平台检测; 用户想再缩回 0.6 可手动设 InpUIScale=0.6; 字号 defaultFontScale 仍为 1.0 不变"
 #property description "v1.90 删除信号提醒与波段画线全部代码: 移除 InpWaveLineEnabled/InpSignal*/InpBull*/InpPullback* 等 14 个输入参数 + ENUM_SIGNAL_DIR 枚举 + 13 个函数 (IsBigBullBar/IsBigBearBar/IsTopFractal/IsBottomFractal/FindLatestWave/SignalATR/SignalTFStr/ScoreSignal/DetectBullSignal/DetectBearSignal/UpdateWaveLine/DrawWaveLine/CheckSignals) + 7 个全局变量 (g_sigLongID/g_sigShortID/g_waveT1-2/g_waveP1-2/g_waveDir) + WaveName() 函数 + OnTick/OnDeinit 调用; Williams 分形 (InpAdjust*/IsWilliamsLow/High/BuildSwingCandidates/FindNearestSwing) 与 FVG/UI/下单完全独立, 不受影响"
+#property description "v1.91 新增信号提醒 (InpSignalAlert 默认 false): 价位 = 区间顶部回撤 49% (g_p1 - 0.49×Range, 与可拖动 0.49 线解耦); 方向由 Dir() 判定 (long=等价格从上方穿越向下, short=等价格从下方穿越向上); 跨价位瞬间报警一次后锁定, 直到 p1/p0 调整或按钮重开重置; 新增 SIGNAL/OFF 切换按钮 (占用原 ADJUST 位置 — LONG 右侧 4px, 与 SWAP/CANCEL 同 Y); ADJUST 按钮改为钉在图表右下角 (右下 4px 偏移, 跟随周期切换/缩放/拖动端点线自动重新定位, 通过 ChartGetInteger CHART_WIDTH/HEIGHT_IN_PIXELS 实现, CHARTEVENT_CHART_CHANGE 设 g_dirty=true 触发 RefreshAll)"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -87,6 +88,13 @@ input bool               InpFVG_HigherTF_Enabled = false;  // [FVG] 叠加高级
 input bool               InpFVG_HigherTF_Auto    = true;    // [FVG] 自动按当前周期选高级别 (Auto=false 时用 InpFVG_HigherTF_Period)
 input ENUM_TIMEFRAMES    InpFVG_HigherTF_Period  = PERIOD_H1;// [FVG] 手动指定的高级周期 (Auto=false 时生效)
 input int                InpFVG_MinPoints        = 0;         // [FVG] 最小缺口宽度 (points), 0=不过滤
+
+// v1.91 新增: 信号提醒 — 价格首次回调到区间 0.49 位置时弹窗+日志
+//   价位计算: g_p1 - 0.49*(g_p1 - g_p0)  (从顶部回撤 49%, 与 g_p1/g_p0 边界联动; 不使用可拖动的 0.49 线)
+//   方向: Dir() 判定 (DIR_UP=long 等价格从上方穿越向下; DIR_DOWN=short 等价格从下方穿越向上)
+//   首次: 跨价位瞬间报警一次, 之后锁定, 直到 p1/p0 调整或按钮关闭再开重置
+//   注意: 按钮可运行时切换 (ToggleSignalAlert), 切换时也会重置已触发状态
+input bool InpSignalAlert = false;  // [信号提醒] 总开关 (默认关; 运行时由 SIGNAL 按钮切换)
 
 //---------------------------- 固定比例 -----------------------------//
 #define RATIO_100 1.00
@@ -195,6 +203,18 @@ long     g_lastStepTimeMs   = 0;
 //     g_fillShown  = (state == 1)        // 仅 state 1 显示填补态
 //   默认 state=0 (FVG, U/P 可见, F 隐藏) — 等价于 v1.82 的 g_fvgEnabled=true && g_fillShown=false
 int               g_fvgState       = 0;
+
+// v1.91 新增: 信号提醒状态
+//   g_pullbackLevel: 报警价位 = g_p1 - 0.49*(g_p1 - g_p0), 每次 p1/p0 变化或按钮切换时重算
+//   g_prevSamplePrice: 上次 OnTick 采样的价格, 用于检测跨价位 (long: prev>level && now<=level)
+//   g_pullbackFired: 本轮是否已报警 (锁定, 直到 p1/p0 调整或按钮重置)
+//   g_prevP1/g_prevP0: 上次 p1/p0 快照, 1 tick 内差异 > _Point 视为边界被调整 → 重置 g_pullbackFired 并重新采样
+double            g_pullbackLevel    = 0.0;
+double            g_prevSamplePrice  = 0.0;
+bool              g_pullbackFired    = false;
+double            g_prevP1           = 0.0;
+double            g_prevP0           = 0.0;
+
 ENUM_TIMEFRAMES   g_higherTF      = PERIOD_H1;             // 实际生效的高级周期
 // FVG 单条记录 (检测 + 状态 紧凑存储)
 //   formTime= 形成时间 (中间 K 线时间), top= 上边界, bot= 下边界, status=0/1/2, dir=DIR_UP/DOWN
@@ -418,6 +438,9 @@ string HideName()          { return g_prefix + "HIDE"; }
 // v1.13: 一键调整 1.00/0.00 到最近高低点的按钮对象名
 string AdjustName()        { return g_prefix + "ADJUST"; }
 
+// v1.91: 信号提醒开关按钮对象名 (放在原 ADJUST 位置 — LONG 右侧 4px, 与 SWAP/ADJUST/CANCEL 同 Y)
+string SignalName()        { return g_prefix + "SIGNAL"; }
+
 // v1.17 新增: 4 条主线的 UP/DOWN 步进按钮对象名 (ratio=100/079/049/000, dir=+1/-1)
 string StepName(double ratio, int dir)
   {
@@ -471,6 +494,30 @@ bool CreateAdjustButton()
    return true;
   }
 
+// v1.91: 信号提醒开关按钮 — 2 态切换 SIGNAL/OFF (默认 OFF)
+//   位置由 UpdateSignalButtonPosition 设为原 ADJUST 位置 (LONG 右侧 4px, 与 SWAP/ADJUST/CANCEL 同 Y)
+bool CreateSignalButton()
+  {
+   string name = SignalName();
+   if(!ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0)) return false;
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, UI(80));
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, UI(22));
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Font(7));
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
+   ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetString(0, name, OBJPROP_FONT, "Arial");
+   ObjectSetString(0, name, OBJPROP_TOOLTIP,
+                   "信号提醒 切换 (运行时): SIGNAL=开, OFF=关\n"
+                   "· 价位 = 区间顶部回撤 49% (= g_p1 - 0.49×Range, 与可拖动的 0.49 线无关)\n"
+                   "· 方向 = Dir() 自动判定 (DIR_UP=long, DIR_DOWN=short)\n"
+                   "· 首次跨价位报警一次后锁定, 直到边界调整或按钮重开");
+   UpdateSignalButton();   // 同步文字/颜色/STICKY (依据 InpSignalAlert 初始值)
+   return true;
+  }
+
 // 通用操作按钮（取消挂单 / 清仓）
 bool CreateActionButton(string name, int xsize, string text, color bg, string tooltip)
   {
@@ -504,6 +551,7 @@ void CreateObjects()
    CreateButton(BName(RATIO_049));
    CreateSwapButton();
    CreateAdjustButton();   // v1.13: ADJUST 按钮 (位置由 UpdateAdjustButton 跟随 SWAP 设置)
+   CreateSignalButton();  // v1.91: 信号提醒开关按钮 (位置由 UpdateSignalButtonPosition 设在原 ADJUST 位)
    CreateActionButton(CancelPendingName(), 100, "CANCEL",       C'120,120,120', "取消当前品种全部挂单（含手动单），不影响其他品种");
    CreateActionButton(CloseAllName(),      100, "CALL",          C'200,120,20',  "平掉当前品种全部持仓（不涉及挂单），不影响其他品种");
    CreateActionButton(CloseHalfName(),      80, "CHALF",         C'230,140,40',  "按手数砍半平仓当前品种持仓；若砍半后 < 最小手数则全平该仓位");
@@ -658,17 +706,64 @@ void UpdateSwapButton(int dir)
 // v1.13: ADJUST 按钮位置 (在 SWAP 右侧 4px)
 // v1.26: Y 改 y+4 (SWAP/ADJUST/CANCEL 三个按钮统一在 topPrice 线下方 4px, 不被线穿过)
 // v1.61: 跟随 LONG 右侧 4px (改为左对齐链, xAdjust = xLong + 84)
+// v1.91: 改为钉在图表右下角 — 周期切换/缩放/拖动端点线时自动跟随
+//   使用 ChartGetInteger(CHART_WIDTH_IN_PIXELS/CHART_HEIGHT_IN_PIXELS) 取当前像素尺寸
+//   X = w - UI(80) - UI(4) (按钮宽 80 + 4px 右偏移), Y = h - UI(22) - UI(4) (按钮高 22 + 4px 下偏移)
+//   CHARTEVENT_CHART_CHANGE 已设 g_dirty=true → RefreshAll → 本函数 → 自动跟随
 void UpdateAdjustButton()
   {
    string name = AdjustName();
+   if(ObjectFind(0, name) < 0) return;
+   int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   int h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+   int x = w - UI(80) - UI(4);   // 4px 右偏移
+   int y = h - UI(22) - UI(4);   // 4px 下偏移
+   if(x < 0) x = 0;
+   if(y < 0) y = 0;
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+  }
+
+// v1.91: SIGNAL 按钮文字 + 颜色 + sticky 同步
+//   开 (InpSignalAlert=true):  文字 "SIGNAL" + 浅灰底 + sticky=true  (按下 = 监控中)
+//   关 (InpSignalAlert=false): 文字 "OFF"    + 深灰底 + sticky=false (弹起 = 已关闭)
+//   与 HIDE 按钮设计一致 — sticky 表示当前生效状态, 不是点击瞬时态
+void UpdateSignalButton()
+  {
+   string name = SignalName();
+   if(ObjectFind(0, name) < 0) return;
+   ObjectSetString (0, name, OBJPROP_TEXT,    InpSignalAlert ? "SIGNAL" : "OFF");
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, InpSignalAlert ? C'160,200,160' : C'90,90,90');
+   ObjectSetInteger(0, name, OBJPROP_STATE,   InpSignalAlert);
+  }
+
+// v1.91: SIGNAL 按钮位置 — 占用原 ADJUST 位置 (LONG 右侧 4px, 与 SWAP/ADJUST/CANCEL 同 Y)
+//   Y 由顶线 (topPrice = max(g_p1, g_p0)) 决定, 距线下 4px, 与 SWAP/CANCEL 三个按钮 Y 对齐
+void UpdateSignalButtonPosition()
+  {
+   string name = SignalName();
    if(ObjectFind(0, name) < 0) return;
    int x = 0, y = 0;
    double topPrice = MathMax(g_p1, g_p0);
    if(!ChartTimePriceToXY(0, 0, RightAnchor(), topPrice, x, y)) return;
    int stepBox  = UI(STEP_BTN_X) + (UI(STEP_BTN_W) + UI(STEP_BTN_GAP)) + UI(STEP_BTN_W);
-   int xAdjust  = stepBox + UI(8) + UI(80) + UI(4);
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, xAdjust);
+   int xSignal  = stepBox + UI(8) + UI(80) + UI(4);   // = 原 ADJUST X
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, xSignal);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y + UI(4));
+  }
+
+// v1.91: 切换信号提醒总开关 — OnChartEvent 收到 SIGNAL 按钮点击时调用
+//   切换时强制重置状态: g_pullbackFired=false, g_prevSamplePrice=0 (下一 tick 重新采样), g_prevP1/P0 重新初始化
+void ToggleSignalAlert()
+  {
+   InpSignalAlert     = !InpSignalAlert;
+   g_pullbackFired    = false;
+   g_prevSamplePrice  = 0.0;    // 强制下一 tick 重新采样, 避免"按钮开瞬间就报警"
+   g_prevP1           = g_p1;
+   g_prevP0           = g_p0;
+   g_pullbackLevel    = (g_p1 > 0 && g_p0 > 0) ? (g_p1 - 0.49 * (g_p1 - g_p0)) : 0.0;
+   UpdateSignalButton();
+   Print("[信号提醒] ", InpSignalAlert ? "已启用 (价位=" + DoubleToString(g_pullbackLevel, _Digits) + ")" : "已关闭");
   }
 
 //+------------------------------------------------------------------+
@@ -1472,6 +1567,65 @@ string FVGLblName(datetime formTime, int tfMin)
    return g_prefix + "FVG_L_" + IntegerToString((long)formTime) + "_" + IntegerToString(tfMin);
   }
 
+// v1.91: 信号提醒主入口 — OnTick 每 tick 调用
+//   报警价位 = g_p1 - 0.49*(g_p1 - g_p0)  (从顶部回撤 49%, 与可拖动的 0.49 线无关)
+//   方向 = Dir() (DIR_UP=long 等价格从上方穿越到 ≤ level; DIR_DOWN=short 等价格从下方穿越到 ≥ level)
+//   "首次" = 跨价位那一 tick (prevSamplePrice 在 level 异侧, 当前价在 level 同侧), 报警一次后锁定
+//   锁定解除条件: ① p1/p0 调整 (>_Point); ② 按钮切换 (ToggleSignalAlert 重置状态)
+//   边界变化检测: 与上次记录的 g_prevP1/g_prevP0 比较, 超过 _Point 视为用户拖动了 1.00/0.00 线
+void CheckPullbackSignal()
+  {
+   if(!InpSignalAlert)            return;   // 总开关关闭 → 零开销
+   if(g_p1 <= 0 || g_p0 <= 0)     return;   // 边界未初始化
+   if(MathAbs(g_p1 - g_p0) < _Point) return; // 区间过窄 (DIR_FLAT 等价)
+
+   // ① 边界变化检测 → 重置状态机
+   bool p1Changed = (MathAbs(g_p1 - g_prevP1) > _Point);
+   bool p0Changed = (MathAbs(g_p0 - g_prevP0) > _Point);
+   if(p1Changed || p0Changed)
+     {
+      g_pullbackFired    = false;
+      g_prevSamplePrice  = 0.0;     // 强制下一 tick 重新采样, 避免"边界刚改完就立刻报警"
+      g_prevP1           = g_p1;
+      g_prevP0           = g_p0;
+      g_pullbackLevel    = g_p1 - 0.49 * (g_p1 - g_p0);
+      if(InpSignalAlert) PrintFormat("[信号提醒] 边界调整 — 重置状态: p1=%.5f p0=%.5f level=%.5f", g_p1, g_p0, g_pullbackLevel);
+      return;
+     }
+
+   if(g_pullbackFired) return;     // 已锁定, 本轮不再报警
+
+   // ② 计算当前采样价 + 与上次比较
+   int dir = Dir();
+   double level = g_p1 - 0.49 * (g_p1 - g_p0);
+   g_pullbackLevel = level;
+
+   // long 看 BID (回调下跌穿越); short 看 ASK (反弹上涨穿越)
+   double px = (dir == DIR_UP) ? SymbolInfoDouble(_Symbol, SYMBOL_BID)
+                               : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(px <= 0) return;
+
+   // ③ 首 tick 采样 (不评估, 避免"开关刚开就报警")
+   if(g_prevSamplePrice == 0.0) { g_prevSamplePrice = px; return; }
+
+   // ④ 跨价位检测
+   bool crossDown = (g_prevSamplePrice > level) && (px <= level);   // long
+   bool crossUp   = (g_prevSamplePrice < level) && (px >= level);   // short
+   bool crossed   = (dir == DIR_UP) ? crossDown :
+                    (dir == DIR_DOWN) ? crossUp : false;
+
+   if(crossed)
+     {
+      g_pullbackFired = true;
+      string dirStr = (dir == DIR_UP) ? "long" : "short";
+      string msg    = StringFormat("[FibLimitAssist] %s 价格首次回调到区间 0.49 位置: %.5f (区间顶=%.5f, 底=%.5f, Range=%.5f)",
+                                   dirStr, level, g_p1, g_p0, MathAbs(g_p1 - g_p0));
+      Alert(msg);
+      Print("[信号提醒] ", msg);
+     }
+   g_prevSamplePrice = px;
+  }
+
 // v1.45: 主入口 — 检测 + 分类 + 绘制 FVG 矩形
 //   扫描范围: 图表可见区 (ChartGetInteger(CHART_FIRST_VISIBLE_BAR) + CHART_WIDTH_IN_BARS)
 //   多周期: 当前周期必扫; 启用 InpFVG_HigherTF_Enabled 时额外扫 g_higherTF
@@ -1761,7 +1915,8 @@ void RefreshAll()
    UpdateMidLines(dir);   // v1.25: 0.79/0.49 线颜色随方向 (与按钮配色统一)
 
    UpdateSwapButton(dir);
-   UpdateAdjustButton();   // v1.13: ADJUST 按钮位置 (跟随 SWAP)
+   UpdateAdjustButton();   // v1.13: ADJUST 按钮位置 (跟随 SWAP) — v1.91: 改为钉在右下角
+   UpdateSignalButtonPosition();   // v1.91: SIGNAL 按钮位置 (原 ADJUST 位 — LONG 右侧 4px)
    UpdateStepButtons();   // v1.17: 4 条主线的 UP/DOWN 按钮 (跟随线移动)
    UpdateMarketButton(dir);
    UpdateStopButton(dir);   // v1.31: 突破挂单按钮文字与配色跟随方向
@@ -3339,6 +3494,9 @@ void OnTick()
    else        { UpdatePnLDisplay(); UpdateRatioLabels(); UpdateSpreadDisplay(); ChartRedraw(0); }   // v1.08 PnL + v1.35 盈亏比 + v1.75 点差 — 每个 tick 都刷新, 不等新柱
 
    UpdateFVGDisplay();  // v1.45 FVG 矩形 — 每 tick 实时判定 U→P→F (独立于 g_dirty)
+
+   // v1.91: 信号提醒 — 价格首次回调到区间 0.49 位置时弹窗+日志 (内部判断 InpSignalAlert, 关闭时零开销)
+   CheckPullbackSignal();
   }
 
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
@@ -3417,6 +3575,11 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       if(sparam == FVGButtonName())
         {
          AdvanceFVGState();   // v1.83: 状态机前进 (FVG→FILL→OFF→FVG), 替代 v1.81 双 bool 翻转
+         return;
+        }
+      if(sparam == SignalName())   // v1.91: 信号提醒开关按钮 — 切换 SIGNAL/OFF
+        {
+         ToggleSignalAlert();   // 内部已 UpdateSignalButton + Print
          return;
         }
       // v1.81: FILL 按钮 — 切换填补态 (status=2) 显隐

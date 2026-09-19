@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.88"
-#property description "半自动斐波那契限价下单辅助 (v1.88)"
+#property version   "1.89"
+#property description "半自动斐波那契限价下单辅助 (v1.89)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -27,6 +27,7 @@
 #property description "v1.86 新增 0.73 装饰线 (青色虚线, 不可拖动, 与 0.19 灰色虚线区分): 价格从 0.00 起占区间 73% 处的结构参考线; 用 inline 模式与 0.19 共用 CreateHLine/UpdateLabel/CreateLabelRight/UpdateLabelRight, 不抽专用函数"
 #property description "v1.87 端点 1.00/0.00 线宽 2→1: 与 0.79/0.49 中线统一宽度 (STYLE_SOLID width=1), 仅用 CLR_END 灰色 vs CLR_FLAT_BG 动态方向色区分边界与挂单线; 视觉更轻盈, 减少对图表的遮挡"
 #property description "v1.88 InpUIScale 默认 1 → 0: 恢复 v1.27 的平台自动智能默认 (Windows=0.6 自动缩小到 60%, Mac/Wine=1.0 原始尺寸); 取消 v1.85 强制 1:1 原始像素, Windows 远程服务器按钮回归较小尺寸"
+#property description "v1.89 取消 Windows=0.6 平台默认: defaultUIScale 统一 1.0 (Windows 和 Wine/mac 一律按原始 1:1 像素), 删除 isWindows 平台检测; 用户想再缩回 0.6 可手动设 InpUIScale=0.6; 字号 defaultFontScale 仍为 1.0 不变"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -3730,10 +3731,10 @@ int OnInit()
    g_prefix = "FLA_" + IntegerToString(ChartID()) + "_" + _Symbol + "_" + EnumToString(_Period) + "_";
 
    // v1.29: 计算 UI/字号缩放系数 — 手动值优先, 0 则按平台智能默认
-   //   平台检测: IsWine() 判 Wine 环境(mac/Linux), 否则视为原生 Windows(远程 RDP/本地 Win)
-   //   智能默认: Wine(mac) → UI 1.0 / Font 1.0;  原生 Windows → UI 0.6 / Font 1.0 (按钮缩小但字保持清晰)
-   bool isWindows = !IsWine();
-   double defaultUIScale   = isWindows ? 0.6 : 1.0;
+   //   v1.89: UI 缩放取消平台区分 — Windows 和 Wine/mac 一律 defaultUIScale=1.0
+   //         (历史: v1.27 引入时 Windows=0.6 自动缩小挡图, v1.85 默认改 1.0, v1.88 改回 0.6, v1.89 改为统一 1.0)
+   //   字号仍保持 defaultFontScale=1.0 (按钮缩小但字保持可读, 与缩放系数解耦)
+   double defaultUIScale   = 1.0;   // v1.89: 取消 Windows=0.6 的平台默认, 所有平台统一 1.0
    double defaultFontScale = 1.0;   // 默认字号不变 (按钮缩小但字保持可读)
    g_uiScale   = (InpUIScale   > 0.01) ? InpUIScale   : defaultUIScale;
    g_fontScale = (InpFontScale > 0.01) ? InpFontScale : defaultFontScale;

@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.94"
-#property description "半自动斐波那契限价下单辅助 (v1.94)"
+#property version   "1.95"
+#property description "半自动斐波那契限价下单辅助 (v1.95)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -32,6 +32,7 @@
 #property description "v1.92 修复编译错误 'InpSignalAlert constant cannot be modified': MQL5 input 是编译期常量, 运行时不能赋值; 拆成 input InpSignalAlert (启动默认值) + 运行时变量 g_signalAlert (按钮切换); OnInit 把 InpSignalAlert 拷给 g_signalAlert, ToggleSignalAlert/UpdateSignalButton/CheckPullbackSignal 全部改读 g_signalAlert"
 #property description "v1.93 修复 SIGNAL 按钮 tooltip 编译错误 (519-520 行): 用户在 MetaEditor 编译时报告 '1未能识别中文字符' 系列错误 + 'UpdateSignalButton() 意外的令牌', 怀疑 MetaEditor 对 4 行连续中文字符串字面量解析异常; 改用局部 string 变量承载多行 tooltip 后再传入 ObjectSetString (与 ADJUST 按钮的 + 拼接形成对照), 保持中文与 · 字符原样"
 #property description "v1.94 修复 SIGNAL 按钮第一次点击无视觉反馈的 bug: ToggleSignalAlert 末尾缺少 ChartRedraw(0) 调用, UpdateSignalButton 写入的 TEXT/BGCOLOR/STATE 在 OnChartEvent 返回前不立即生效, 需等下一次 RefreshAll/ChartRedraw 才显示, 导致用户感觉第一次点击没反应 (实际 g_signalAlert 已翻转, 第二次 redraw 才把 SIGNAL 显示出来); 对比 AdvanceFVGState 直接调 ChartRedraw(0), ToggleHide 经 RefreshAll → ChartRedraw(0); 修复方案在 ToggleSignalAlert 末尾加 ChartRedraw(0), 与其他 sticky 按钮同步; 顺便在 CreateSignalButton 中显式设置 OBJPROP_STATE=false + OBJPROP_BGCOLOR=深灰, 与 CreateActionButton 初始化模式一致 (v1.93 仅靠 UpdateSignalButton 派生, 极端情况可能有视觉闪烁)"
+#property description "v1.95 调整 SIGNAL 按钮配色: 开(SIGNAL)=红色 C'200,60,60' (警示色, 与 CHALF 橙红 C'230,140,40'/CALL 橙 C'200,120,20' 同一暖色系但更红更醒目), 关(OFF)=灰色 C'120,120,120' (与 CANCEL 按钮一致 — 两个按钮同处顶部第二排, 配色统一视觉不杂乱); 同步修改 CreateSignalButton 初始化 BGCOLOR 和 UpdateSignalButton 三元表达式; 配色方案在 CLAUDE.md/SKILL 中没指定具体 RGB, 我选了红偏暗 (R=200) 而非纯红 clrRed (R=255) 避免太刺眼, 与其他按钮饱和度一致"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -515,7 +516,7 @@ bool CreateSignalButton()
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    // v1.94: 显式设置初始 STATE/BGCOLOR/TEXT, 与 CreateActionButton 一致 — 仅靠 UpdateSignalButton 派生在某些 MT5 启动顺序下会有视觉闪烁
    ObjectSetInteger(0, name, OBJPROP_STATE,   false);
-   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'90,90,90');
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'120,120,120');   // v1.95: OFF 底色与 CANCEL 按钮一致 (灰色)
    ObjectSetString (0, name, OBJPROP_TEXT,    "OFF");
    ObjectSetString(0, name, OBJPROP_FONT, "Arial");
    // v1.93: 用局部 string 变量承载多行 tooltip, 避免 MetaEditor 对连续字符串字面量的解析报错
@@ -735,8 +736,8 @@ void UpdateAdjustButton()
   }
 
 // v1.91: SIGNAL 按钮文字 + 颜色 + sticky 同步
-//   开 (g_signalAlert=true):  文字 "SIGNAL" + 浅绿底 + sticky=true  (按下 = 监控中)
-//   关 (g_signalAlert=false): 文字 "OFF"    + 深灰底 + sticky=false (弹起 = 已关闭)
+//   开 (g_signalAlert=true):  文字 "SIGNAL" + 红色底  + sticky=true  (按下 = 监控中)
+//   关 (g_signalAlert=false): 文字 "OFF"    + 灰色底  + sticky=false (弹起 = 已关闭, 灰与 CANCEL 一致)
 //   与 HIDE 按钮设计一致 — sticky 表示当前生效状态, 不是点击瞬时态
 //   读 g_signalAlert 而非 InpSignalAlert: MQL5 input 是编译期常量, 按钮切换改运行时变量
 void UpdateSignalButton()
@@ -744,7 +745,7 @@ void UpdateSignalButton()
    string name = SignalName();
    if(ObjectFind(0, name) < 0) return;
    ObjectSetString (0, name, OBJPROP_TEXT,    g_signalAlert ? "SIGNAL" : "OFF");
-   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, g_signalAlert ? C'160,200,160' : C'90,90,90');
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, g_signalAlert ? C'200,60,60' : C'120,120,120');   // v1.95: 开=红 C'200,60,60', 关=灰 C'120,120,120' (与 CANCEL 一致)
    ObjectSetInteger(0, name, OBJPROP_STATE,   g_signalAlert);
   }
 

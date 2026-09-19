@@ -4,13 +4,12 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.89"
-#property description "半自动斐波那契限价下单辅助 (v1.89)"
+#property version   "1.90"
+#property description "半自动斐波那契限价下单辅助 (v1.90)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
 #property description "FVG 完全独立于 HIDE; F 状态矩形止于填补 K 线起点; 部分填补只画剩余未填补 (v1.57)"
-#property description "v1.40+ 信号提醒: 强弱回调/反弹形态评分 + Alert推送 + 波段画线(独立于信号,InpWaveLineEnabled)"
 #property description "v1.50-v1.59 修复详情见项目说明文档第 13 章 (描述符总数受限, 变更记录仅保留概要)"
 #property description "v1.61 顶部按钮左对齐链: LONG→ADJUST→CANCEL 类似底部 HIDE→RISK→FVG 链, stepBox+8/92/176 递进"
 #property description "v1.74 MKT+STP 横向相邻 4px 整体居中 (替代原 MARKET 居中 + STOP 上下排), LONG/SHORT 统一 STP 在 MKT 右边"
@@ -28,6 +27,7 @@
 #property description "v1.87 端点 1.00/0.00 线宽 2→1: 与 0.79/0.49 中线统一宽度 (STYLE_SOLID width=1), 仅用 CLR_END 灰色 vs CLR_FLAT_BG 动态方向色区分边界与挂单线; 视觉更轻盈, 减少对图表的遮挡"
 #property description "v1.88 InpUIScale 默认 1 → 0: 恢复 v1.27 的平台自动智能默认 (Windows=0.6 自动缩小到 60%, Mac/Wine=1.0 原始尺寸); 取消 v1.85 强制 1:1 原始像素, Windows 远程服务器按钮回归较小尺寸"
 #property description "v1.89 取消 Windows=0.6 平台默认: defaultUIScale 统一 1.0 (Windows 和 Wine/mac 一律按原始 1:1 像素), 删除 isWindows 平台检测; 用户想再缩回 0.6 可手动设 InpUIScale=0.6; 字号 defaultFontScale 仍为 1.0 不变"
+#property description "v1.90 删除信号提醒与波段画线全部代码: 移除 InpWaveLineEnabled/InpSignal*/InpBull*/InpPullback* 等 14 个输入参数 + ENUM_SIGNAL_DIR 枚举 + 13 个函数 (IsBigBullBar/IsBigBearBar/IsTopFractal/IsBottomFractal/FindLatestWave/SignalATR/SignalTFStr/ScoreSignal/DetectBullSignal/DetectBearSignal/UpdateWaveLine/DrawWaveLine/CheckSignals) + 7 个全局变量 (g_sigLongID/g_sigShortID/g_waveT1-2/g_waveP1-2/g_waveDir) + WaveName() 函数 + OnTick/OnDeinit 调用; Williams 分形 (InpAdjust*/IsWilliamsLow/High/BuildSwingCandidates/FindNearestSwing) 与 FVG/UI/下单完全独立, 不受影响"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -77,38 +77,6 @@ input double InpUIScale = 0.0;   // [UI] 按钮尺寸缩放系数 (0=按平台�
 // v1.28 新增: 字号独立缩放系数 (与 InpUIScale 解耦, 防止按钮缩小后文字看不清)
 //   0 = 自动按平台智能默认 (mac=1.0, Windows=1.0); 其他正数 = 强制值 (如 0.8=字小一些)
 input double InpFontScale = 0.0;  // [UI] 字号缩放系数 (0=按平台智能默认; 正数=强制值)
-
-//---------------------------- 波段画线 (v1.44 独立) -----------------------------//
-// 与"交易信号提醒"完全解耦: 只要检测周期里找到一对有效分型(顶+底)且波段幅度达标就画线,
-// 不依赖信号提醒的"触达 50% / 未跌破起点 / 评分达标"等触发条件.
-// 关闭时 OnTick 不会运行波段扫描, 已画的线会被清除.
-input bool InpWaveLineEnabled = false; // [波段画线] 总开关 (默认关, 与 InpSignalEnabled 完全独立)
-
-//---------------------------- 交易信号提醒 (v1.40) -----------------------------//
-// 强势上涨→弱势回调 形态识别 + 5维评分 + PC弹窗(Alert) + 手机推送(SendNotification)
-// 独立模块: 开关关闭时完全不运行, 不影响现有 fib 绘图/下单逻辑
-// 识别用已收盘 bar (shift>=1), 触达/失效用实时价; 按波段去重 (底/顶分型中间 bar 时间戳)
-enum ENUM_SIGNAL_DIR
-  {
-   SIG_DIR_BOTH  = 0,  // 双向 (做多 + 做空)
-   SIG_DIR_LONG  = 1,  // 仅做多
-   SIG_DIR_SHORT = 2,  // 仅做空
-  };
-input bool            InpSignalEnabled    = false;        // [信号] 总开关 (默认关)
-input ENUM_SIGNAL_DIR InpSignalDirection  = SIG_DIR_BOTH; // [信号] 检测方向 (双向/仅多/仅空)
-input ENUM_TIMEFRAMES InpSignalTF         = PERIOD_M5;    // [信号] 检测周期 (独立于图表周期, 默认 M5)
-input int             InpSignalBars       = 80;           // [信号] 检测回看根数
-input int             InpSignalMinScore   = 40;           // [信号] 最低评分 (低于此分不提醒)
-
-input int             InpBullMinBars      = 3;            // [信号] 上涨波段最少根数
-input int             InpBullMaxBars      = 20;           // [信号] 上涨波段最多根数
-input double          InpBullBodyRatio    = 0.6;          // [信号] 大实体阳线判定 (实体/振幅 >= 0.6)
-input double          InpBullMinATR       = 1.0;          // [信号] 波段最小涨幅 (ATR 倍数, 防噪声, 跨周期自适应)
-input int             InpSignalATRPeriod  = 14;           // [信号] ATR 计算周期
-
-input double          InpPullbackDepth    = 0.5;          // [信号] 触发回调位 (50%)
-input int             InpPullbackMinBars  = 1;            // [信号] 回调段最少根数
-input int             InpPullbackMaxBars  = 25;           // [信号] 回调段最多根数
 
 // v1.45 新增: FVG (公允价值缺口) 矩形画图
 input bool               InpFVG_ShowUnfilled     = true;    // [FVG] 显示未填补 (绿/红)
@@ -215,18 +183,6 @@ int      g_serverGMTOffset = 0;
 string   g_lastStepName     = "";
 long     g_lastStepTimeMs   = 0;
 #define  STEP_DBLCLICK_MS   300
-
-// v1.40 新增: 交易信号提醒 — 波段去重 (已提醒波段 ID = 分型中间 bar 时间戳)
-//   做多/做空各维护一个已提醒 ID, 同一波段只提醒一次, 新波段(新时间戳)立即提醒
-datetime g_sigLongID  = 0;   // 已提醒的做多波段 ID (底分型中间 bar 时间戳)
-datetime g_sigShortID = 0;   // 已提醒的做空波段 ID (顶分型中间 bar 时间戳)
-
-// v1.43 新增: 信号波段画线 — 记录最新波段的高低点坐标与方向
-//   画线用"绝对时间 + 价格"(与图表周期无关), 检测周期(InpSignalTF)可与图表周期不同
-//   独立对象前缀 (不以 g_prefix 开头), 故 ApplyHidden 遍历不会隐藏它, 不受 HIDE 按钮影响
-datetime g_waveT1 = 0, g_waveT2 = 0;  // 波段起点/终点时间 (分型 bar 中央)
-double   g_waveP1 = 0, g_waveP2 = 0;  // 波段起点/终点价格
-int      g_waveDir = DIR_FLAT;        // DIR_UP=上涨(绿线), DIR_DOWN=下跌(红线)
 
 // v1.45 新增: FVG 状态机
 //   g_fvgEnabled: FVG 按钮 sticky 状态 (与 HIDE 同步隐藏/显示)
@@ -459,8 +415,6 @@ string FVGButtonName()     { return g_prefix + "FVG_BTN"; }
 string FVGPrefix()         { return g_prefix + "FVG_"; }
 // 隐藏/显示按钮对象名 (始终显示，不会随 g_hidden 隐藏)
 string HideName()          { return g_prefix + "HIDE"; }
-// v1.43: 信号波段线对象名 — 独立前缀 FLAW_ (不以 g_prefix 开头), 故 ApplyHidden/ObjectsDeleteAll(g_prefix) 都不会碰它
-string WaveName()          { return "FLAW_" + IntegerToString(ChartID()) + "_" + _Symbol + "_WAVE"; }
 // v1.13: 一键调整 1.00/0.00 到最近高低点的按钮对象名
 string AdjustName()        { return g_prefix + "ADJUST"; }
 
@@ -1746,7 +1700,7 @@ void ApplyHidden()
       //   FVG 按钮: 仍可见 (用户主动切换显示用)
       //   FVG 矩形: 仍可见 (作为独立的辅助图层)
       //   FVG 标签: 仍可见
-      //   与波段线 (FLAW_ 独立前缀) 设计意图一致 — FVG 也是"独立于主 fib UI 的辅助图层"
+      //   FVG 也是"独立于主 fib UI 的辅助图层"
       // v1.81: FILL 按钮同样独立于 HIDE — FVG 按钮的辅助开关, HIDE 不应影响
       // v1.83: FILL 按钮已合并入 FVG 按钮, 这里只跳过 fvgBtn 一个
       if(name == fvgBtn
@@ -3286,444 +3240,6 @@ void DoSwap()
    RefreshAll();
   }
 
-//---------------------------- 交易信号提醒 (v1.40) -----------------------------//
-// 强势上涨→弱势回调 形态识别 + 5维评分 + Alert(PC弹窗) + SendNotification(手机推送)
-// 只用已收盘 bar 识别结构 (shift>=1), 触达/失效用实时价; 按波段去重 (底/顶分型中间 bar 时间戳)
-
-// 大实体阳线: 收盘>开盘 且 实体/振幅 >= InpBullBodyRatio
-bool IsBigBullBar(int shift)
-  {
-   double o = iOpen(_Symbol, InpSignalTF, shift);
-   double c = iClose(_Symbol, InpSignalTF, shift);
-   double h = iHigh(_Symbol, InpSignalTF, shift);
-   double l = iLow(_Symbol, InpSignalTF, shift);
-   if(c <= o) return false;                 // 非阳线
-   double range = h - l;
-   if(range <= 0) return false;             // 一字/无振幅不算
-   return ((c - o) / range) >= InpBullBodyRatio;
-  }
-
-// 大实体阴线 (做空镜像)
-bool IsBigBearBar(int shift)
-  {
-   double o = iOpen(_Symbol, InpSignalTF, shift);
-   double c = iClose(_Symbol, InpSignalTF, shift);
-   double h = iHigh(_Symbol, InpSignalTF, shift);
-   double l = iLow(_Symbol, InpSignalTF, shift);
-   if(c >= o) return false;
-   double range = h - l;
-   if(range <= 0) return false;
-   return ((o - c) / range) >= InpBullBodyRatio;
-  }
-
-// 顶分型: 3根K线, 中间(shift)最高 > 两边 (须 shift>=1 保证右侧已收盘)
-bool IsTopFractal(int shift)
-  {
-   if(shift < 1) return false;
-   double h = iHigh(_Symbol, InpSignalTF, shift);
-   return (h > iHigh(_Symbol, InpSignalTF, shift - 1) &&
-           h > iHigh(_Symbol, InpSignalTF, shift + 1));
-  }
-
-// 底分型: 3根K线, 中间(shift)最低 < 两边
-bool IsBottomFractal(int shift)
-  {
-   if(shift < 1) return false;
-   double l = iLow(_Symbol, InpSignalTF, shift);
-   return (l < iLow(_Symbol, InpSignalTF, shift - 1) &&
-           l < iLow(_Symbol, InpSignalTF, shift + 1));
-  }
-
-// v1.44: 找检测周期内"最近一个有效波段" — 不依赖信号触达/失效/评分, 只看波段定义
-//   思路: 从 shift=2 开始往旧扫, 找第一个分型(顶或底)作为波段终点; 再往后找最近的相反分型作为起点
-//   终点=顶分型 → 做多波段(底→顶, DIR_UP 绿); 终点=底分型 → 做空波段(顶→底, DIR_DOWN 红)
-//   校验: 波段幅度 >= InpBullMinATR × ATR(防噪声门槛, 与现有"波段定义"保持一致); 否则视为无效
-bool FindLatestWave(int &iStart, int &iEnd, double &pStart, double &pEnd, int &dirOut)
-  {
-   int totalBars = Bars(_Symbol, InpSignalTF);
-   int maxShift = MathMin(InpSignalBars, totalBars) - 1;
-   if(maxShift < 5) return false;
-
-   // 1) 找最近一个分型 (shift 最小, 即最靠近当前 bar 的已收盘分型)
-   int newest = -1;
-   bool newestIsTop = false;
-   for(int i = 2; i <= maxShift; i++)
-     {
-      if(IsTopFractal(i))    { newest = i; newestIsTop = true;  break; }
-      if(IsBottomFractal(i)) { newest = i; newestIsTop = false; break; }
-     }
-   if(newest < 0) return false;
-
-   // 2) 往后(更旧)找最近的相反分型作为波段起点
-   int startShift = -1;
-   bool wantTop = !newestIsTop;
-   for(int i = newest + 1; i <= maxShift; i++)
-     {
-      if(wantTop  && IsTopFractal(i))    { startShift = i; break; }
-      if(!wantTop && IsBottomFractal(i)) { startShift = i; break; }
-     }
-   if(startShift < 0) return false;
-
-   // 3) 设置起点/终点 + 方向
-   iStart = startShift; iEnd = newest;
-   if(newestIsTop)
-     {
-      // 做多波段: 底→顶
-      pStart = iLow (_Symbol, InpSignalTF, iStart);
-      pEnd   = iHigh(_Symbol, InpSignalTF, iEnd);
-      dirOut = DIR_UP;
-     }
-   else
-     {
-      // 做空波段: 顶→底
-      pStart = iHigh(_Symbol, InpSignalTF, iStart);
-      pEnd   = iLow (_Symbol, InpSignalTF, iEnd);
-      dirOut = DIR_DOWN;
-     }
-
-   // 4) 防噪声: 波段幅度门槛 (与信号模块共用 InpBullMinATR × ATR, 跨周期自适应)
-   double atr = SignalATR();
-   if(atr <= 0) return false;
-   double swing = MathAbs(pEnd - pStart);
-   if(swing < InpBullMinATR * atr) return false;
-
-   return true;
-  }
-
-// 检测周期 ATR (取不到时用当前价兜底)
-double SignalATR()
-  {
-   // 注意: iATR() 返回的是 indicator handle(int), 不是 ATR 数值, 需用 CopyBuffer 取出
-   // 正确签名: int iATR(string symbol, ENUM_TIMEFRAMES period, int ma_period)  — 只 3 个参数
-   double atr = 0.0;
-   int h = iATR(_Symbol, InpSignalTF, InpSignalATRPeriod);
-   if(h != INVALID_HANDLE)
-     {
-      double buf[];
-      if(CopyBuffer(h, 0, 0, 1, buf) == 1) atr = buf[0];   // 当下 shift=0
-      if(atr <= 0 && CopyBuffer(h, 0, 1, 1, buf) == 1) atr = buf[0];  // 未完成则取 shift=1
-      IndicatorRelease(h);
-     }
-   if(atr <= 0)
-     {
-      double p = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      if(p <= 0) p = 1.0;
-      atr = p * 0.005;                     // 兜底: 当前价 0.5%
-     }
-   return atr;
-  }
-
-// 检测周期文字 (PERIOD_M5 → "M5")
-string SignalTFStr()
-  {
-   string s = EnumToString(InpSignalTF);
-   return StringSubstr(s, 7);              // 去掉 "PERIOD_" 前缀
-  }
-
-// 5维评分 (0~100): 波段强度30 / 实体质量20 / 回调弱势25 / 分型确认15 / 形态完整10
-//   iStart/iEnd = 波段起点/终点分型 shift (iStart > iEnd, 起点更旧)
-//   startPrice/endPrice = 起点/终点价格 (做多: 低点/高点; 做空: 高点/低点)
-//   isLong = true 做多(大实体阳线) / false 做空(大实体阴线)
-double ScoreSignal(int iStart, int iEnd, double startPrice, double endPrice, int pullbackBars, double atr, bool isLong)
-  {
-   int nbars = iStart - iEnd + 1;
-   double swing = MathAbs(endPrice - startPrice);   // 波段总幅度
-   if(swing <= 0 || nbars <= 0) return 0.0;
-
-   // 1. 波段强度 (30%): 平均每根幅度 / ATR, 每根走满 1 个 ATR 得满分
-   double avgSwing = swing / nbars;
-   double s1 = MathMin(100.0, (avgSwing / atr) * 100.0);
-
-   // 2. 实体质量 (20%): 中间根里大实体(阳/阴)占比
-   int bigCount = 0, midCount = 0;
-   for(int i = iEnd + 1; i <= iStart - 1; i++)
-     {
-      midCount++;
-      if(isLong ? IsBigBullBar(i) : IsBigBearBar(i)) bigCount++;
-     }
-   double s2 = (midCount > 0) ? ((double)bigCount / midCount) * 100.0 : 0.0;
-
-   // 3. 回调弱势度 (25%): 回调斜率(每根) vs 波段斜率(每根), 回调越慢越弱势
-   int pb = MathMax(1, pullbackBars);
-   double swingSlope = swing / nbars;                    // 波段每根幅度
-   double pbSlope    = (swing * InpPullbackDepth) / pb;  // 回调每根幅度(回到50%)
-   double s3 = 0.0;
-   if(swingSlope > 0)
-      s3 = MathMax(0.0, (1.0 - pbSlope / swingSlope) * 100.0);
-   s3 = MathMin(100.0, s3);
-
-   // 4. 分型确认度 (15%): 底/顶分型中间超出两侧的幅度 (相对 ATR)
-   double exStart = 0.0, exEnd = 0.0;
-   if(isLong)
-     {
-      // 底分型 iStart: 中间低点低于两边低点
-      exStart = (iLow(_Symbol, InpSignalTF, iStart - 1) - startPrice) +
-                (iLow(_Symbol, InpSignalTF, iStart + 1) - startPrice);
-      // 顶分型 iEnd: 中间高点高于两边高点
-      exEnd = (endPrice - iHigh(_Symbol, InpSignalTF, iEnd - 1)) +
-              (endPrice - iHigh(_Symbol, InpSignalTF, iEnd + 1));
-     }
-   else
-     {
-      // 顶分型 iStart: 中间高点高于两边高点
-      exStart = (startPrice - iHigh(_Symbol, InpSignalTF, iStart - 1)) +
-                (startPrice - iHigh(_Symbol, InpSignalTF, iStart + 1));
-      // 底分型 iEnd: 中间低点低于两边低点
-      exEnd = (iLow(_Symbol, InpSignalTF, iEnd - 1) - endPrice) +
-              (iLow(_Symbol, InpSignalTF, iEnd + 1) - endPrice);
-     }
-   double s4 = MathMin(100.0, ((exStart + exEnd) / atr) * 100.0);
-
-   // 5. 形态完整度 (10%): 波段根数贴近理想值 8
-   double s5 = MathMax(0.0, 100.0 - MathAbs(nbars - 8.0) * 10.0);
-
-   return 0.30 * s1 + 0.20 * s2 + 0.25 * s3 + 0.15 * s4 + 0.10 * s5;
-  }
-
-// 识别做多信号: 强势上涨→弱势回调到50%。触达+有效+评分达标 返回 true
-bool DetectBullSignal(datetime &waveID, double &score, string &detail)
-  {
-   waveID = 0; score = 0.0; detail = "";
-   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   if(bid <= 0) return false;
-   double atr = SignalATR();
-   if(atr <= 0) return false;
-
-   int totalBars = Bars(_Symbol, InpSignalTF);
-   int maxShift = MathMin(InpSignalBars, totalBars) - 1;
-   if(maxShift < 5) return false;   // 检测周期数据不足
-
-   // 扫顶分型 (从新到旧), 顶分型 shift>=2 (右侧已收盘确认)
-   for(int iTop = 2; iTop <= maxShift; iTop++)
-     {
-      if(!IsTopFractal(iTop)) continue;
-      double topPrice = iHigh(_Symbol, InpSignalTF, iTop);
-
-      // 往左找最近底分型 (上涨波段起点)
-      int iBot = -1;
-      for(int j = iTop + 1; j <= maxShift; j++)
-        {
-         if(IsBottomFractal(j)) { iBot = j; break; }
-        }
-      if(iBot < 0) continue;
-
-      double botPrice = iLow(_Symbol, InpSignalTF, iBot);
-      double rise = topPrice - botPrice;
-      if(rise <= 0) continue;
-
-      // 波段根数约束
-      int nbars = iBot - iTop + 1;
-      if(nbars < InpBullMinBars || nbars > InpBullMaxBars) continue;
-
-      // 最小涨幅 (ATR 倍数, 防噪声)
-      if(rise < InpBullMinATR * atr) continue;
-
-      // 回调目标位 = 50% 位
-      double pullbackPrice = topPrice - rise * InpPullbackDepth;
-
-      // 实时价触达 + 未跌破起点 (失效条件)
-      if(bid > pullbackPrice) continue;     // 未触达
-      if(bid <= botPrice)     continue;     // 跌破起点 → 信号失效
-
-      // 回调根数 (顶分型之后到当前的 bar 数 = iTop)
-      int pullbackBars = iTop;
-      if(pullbackBars < InpPullbackMinBars) continue;
-      if(pullbackBars > InpPullbackMaxBars) continue;
-
-      // 评分
-      double sc = ScoreSignal(iBot, iTop, botPrice, topPrice, pullbackBars, atr, true);
-      if(sc < InpSignalMinScore) continue;
-
-      // 命中
-      waveID = iTime(_Symbol, InpSignalTF, iBot);
-      score  = sc;
-      // 注: 波段坐标与画线由 UpdateWaveLine() 统一负责 (v1.44 起与信号触发解耦)
-      detail = StringFormat("涨幅 %.1f点/%d根 | 回调 %.1f点/%d根",
-                            rise / _Point, nbars,
-                            rise * InpPullbackDepth / _Point, pullbackBars);
-      return true;
-     }
-   return false;
-  }
-
-// 识别做空信号: 强势下跌→弱势反弹到50% (做多镜像)
-bool DetectBearSignal(datetime &waveID, double &score, string &detail)
-  {
-   waveID = 0; score = 0.0; detail = "";
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   if(ask <= 0) return false;
-   double atr = SignalATR();
-   if(atr <= 0) return false;
-
-   int totalBars = Bars(_Symbol, InpSignalTF);
-   int maxShift = MathMin(InpSignalBars, totalBars) - 1;
-   if(maxShift < 5) return false;   // 检测周期数据不足
-
-   // 扫底分型 (从新到旧), 底分型 shift>=2
-   for(int iBot = 2; iBot <= maxShift; iBot++)
-     {
-      if(!IsBottomFractal(iBot)) continue;
-      double botPrice = iLow(_Symbol, InpSignalTF, iBot);
-
-      // 往左找最近顶分型 (下跌波段起点)
-      int iTop = -1;
-      for(int j = iBot + 1; j <= maxShift; j++)
-        {
-         if(IsTopFractal(j)) { iTop = j; break; }
-        }
-      if(iTop < 0) continue;
-
-      double topPrice = iHigh(_Symbol, InpSignalTF, iTop);
-      double fall = topPrice - botPrice;
-      if(fall <= 0) continue;
-
-      int nbars = iTop - iBot + 1;
-      if(nbars < InpBullMinBars || nbars > InpBullMaxBars) continue;
-
-      if(fall < InpBullMinATR * atr) continue;
-
-      // 反弹目标位 = 50% 位
-      double pullbackPrice = botPrice + fall * InpPullbackDepth;
-
-      // 实时价触达 + 未反弹突破起点
-      if(ask < pullbackPrice) continue;     // 未触达
-      if(ask >= topPrice)     continue;     // 反弹突破起点 → 失效
-
-      int pullbackBars = iBot;
-      if(pullbackBars < InpPullbackMinBars) continue;
-      if(pullbackBars > InpPullbackMaxBars) continue;
-
-      double sc = ScoreSignal(iTop, iBot, topPrice, botPrice, pullbackBars, atr, false);
-      if(sc < InpSignalMinScore) continue;
-
-      waveID = iTime(_Symbol, InpSignalTF, iTop);
-      score  = sc;
-      // 注: 波段坐标与画线由 UpdateWaveLine() 统一负责 (v1.44 起与信号触发解耦)
-      detail = StringFormat("跌幅 %.1f点/%d根 | 反弹 %.1f点/%d根",
-                            fall / _Point, nbars,
-                            fall * InpPullbackDepth / _Point, pullbackBars);
-      return true;
-     }
-   return false;
-  }
-
-// v1.44: 波段画线主入口 — 每 tick 由 OnTick 调用 (在 CheckSignals 之后)
-//   与信号提醒完全解耦: 只看"波段定义是否成立"(FindLatestWave), 不依赖触达/失效/评分
-//   稳定判断: 用 (iStart, iEnd, dir, tStart, tEnd) 五个量去重, 同一波段不重画, 避免每 tick 闪烁
-void UpdateWaveLine()
-  {
-   // 静态变量记录上一次画线时的波段特征, 用于"波段稳定才重画"判断
-   static int      s_iStart   = -1;
-   static int      s_iEnd     = -1;
-   static int      s_dir      = DIR_FLAT;
-   static datetime s_tStart   = 0;
-   static datetime s_tEnd     = 0;
-
-   if(!InpWaveLineEnabled)
-     {
-      // 关闭时清理已有线 + 重置静态变量
-      ObjectDelete(0, WaveName());
-      s_iStart = -1; s_iEnd = -1; s_dir = DIR_FLAT;
-      s_tStart = 0;  s_tEnd   = 0;
-      return;
-     }
-
-   int    iStart = 0, iEnd = 0, dirOut = DIR_FLAT;
-   double pStart = 0, pEnd  = 0;
-   if(!FindLatestWave(iStart, iEnd, pStart, pEnd, dirOut))
-     {
-      // 找不到有效波段, 清理已有线
-      ObjectDelete(0, WaveName());
-      s_iStart = -1; s_iEnd = -1; s_dir = DIR_FLAT;
-      s_tStart = 0;  s_tEnd   = 0;
-      return;
-     }
-
-   datetime tStart = iTime(_Symbol, InpSignalTF, iStart);
-   datetime tEnd   = iTime(_Symbol, InpSignalTF, iEnd);
-
-   // 稳定判断: 同波段(5 个量全等)就不重画, 避免每 tick 闪烁
-   if(s_iStart == iStart && s_iEnd == iEnd && s_dir == dirOut &&
-      s_tStart == tStart && s_tEnd   == tEnd)
-      return;
-
-   s_iStart = iStart; s_iEnd = iEnd; s_dir = dirOut;
-   s_tStart = tStart; s_tEnd = tEnd;
-
-   // 锚点居中: 分型 bar 开盘时间 + 半个检测周期
-   int tfSec = PeriodSeconds(InpSignalTF);
-   g_waveT1  = tStart + tfSec / 2;
-   g_waveP1  = pStart;
-   g_waveT2  = tEnd   + tfSec / 2;
-   g_waveP2  = pEnd;
-   g_waveDir = dirOut;
-
-   DrawWaveLine();   // 内部先 ObjectDelete 旧线再 ObjectCreate 新线
-  }
-
-// v1.43: 把最新波段高低点画成趋势线 (上涨绿 / 下跌红)
-//   锚点 = 分型 bar 中央的绝对时间 + 价格, 因此与图表周期无关:
-//   即使 InpSignalTF(检测周期) ≠ 图表周期, 线也会精确落在真实高低点位置上
-//   独立前缀 FLAW_ 不被 ApplyHidden 隐藏, 不受 HIDE 按钮影响
-void DrawWaveLine()
-  {
-   string name = WaveName();
-   ObjectDelete(0, name);   // 先删旧线: 同名对象存在时 ObjectCreate 会失败, 无法覆盖上一波段的线
-
-   if(g_waveT1 == 0 || g_waveT2 == 0 || g_waveP1 <= 0 || g_waveP2 <= 0)
-      return;
-
-   if(!ObjectCreate(0, name, OBJ_TREND, 0, g_waveT1, g_waveP1, g_waveT2, g_waveP2))
-      return;
-   ObjectSetInteger(0, name, OBJPROP_COLOR,      (g_waveDir == DIR_UP) ? CLR_BUY_BG : CLR_SELL_BG);
-   ObjectSetInteger(0, name, OBJPROP_WIDTH,      2);
-   ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT,  false);
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, name, OBJPROP_BACK,       false);
-   ChartRedraw(0);
-  }
-
-// 信号提醒主入口: OnTick 里调用; 总开关关闭直接返回
-void CheckSignals()
-  {
-   if(!InpSignalEnabled) return;
-
-   bool doLong  = (InpSignalDirection == SIG_DIR_BOTH || InpSignalDirection == SIG_DIR_LONG);
-   bool doShort = (InpSignalDirection == SIG_DIR_BOTH || InpSignalDirection == SIG_DIR_SHORT);
-
-   datetime waveID = 0;
-   double   score  = 0.0;
-   string   detail = "";
-
-   if(doLong && DetectBullSignal(waveID, score, detail))
-     {
-      if(waveID != 0 && waveID != g_sigLongID)   // 波段去重
-        {
-         g_sigLongID = waveID;
-         // v1.44: 画线由 UpdateWaveLine() 每 tick 独立完成, 与信号触发解耦
-         string msg = StringFormat("[FibLimitAssist] 强势看涨信号 (%s %s) 评分 %.0f/100 | %s",
-                                   _Symbol, SignalTFStr(), score, detail);
-         Alert(msg);
-         SendNotification(msg);
-         Print("[信号] ", msg);
-        }
-     }
-
-   if(doShort && DetectBearSignal(waveID, score, detail))
-     {
-      if(waveID != 0 && waveID != g_sigShortID)
-        {
-         g_sigShortID = waveID;
-         // v1.44: 画线由 UpdateWaveLine() 每 tick 独立完成, 与信号触发解耦
-         string msg = StringFormat("[FibLimitAssist] 强势看跌信号 (%s %s) 评分 %.0f/100 | %s",
-                                   _Symbol, SignalTFStr(), score, detail);
-         Alert(msg);
-         SendNotification(msg);
-         Print("[信号] ", msg);
-        }
-     }
-  }
-
 //---------------------------- 生命周期 -----------------------------//
 int OnInit()
   {
@@ -3807,7 +3323,6 @@ void OnDeinit(const int reason)
    SaveFibPositions();
    // 仅清除本实例图表对象；服务器挂单保留不动
    ObjectsDeleteAll(0, g_prefix, -1, -1);
-   ObjectDelete(0, WaveName());   // v1.43: 波段线独立前缀, 需单独清理 (否则切周期残留旧线)
    ChartRedraw(0);
   }
 
@@ -3823,8 +3338,6 @@ void OnTick()
    if(g_dirty) { RefreshAll(); g_dirty = false; }
    else        { UpdatePnLDisplay(); UpdateRatioLabels(); UpdateSpreadDisplay(); ChartRedraw(0); }   // v1.08 PnL + v1.35 盈亏比 + v1.75 点差 — 每个 tick 都刷新, 不等新柱
 
-   CheckSignals();      // v1.40 交易信号提醒 (内部判断开关, 关闭时零开销直接返回)
-   UpdateWaveLine();    // v1.44 波段画线 (独立于信号提醒, 内部判断开关, 关闭时清理已有线)
    UpdateFVGDisplay();  // v1.45 FVG 矩形 — 每 tick 实时判定 U→P→F (独立于 g_dirty)
   }
 

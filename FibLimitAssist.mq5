@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "2.02"
-#property description "半自动斐波那契限价下单辅助 (v2.02)"
+#property version   "2.03"
+#property description "半自动斐波那契限价下单辅助 (v2.03)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -40,6 +40,7 @@
 #property description "v2.00 SIGNAL 总开关扩展第四类: 盈亏播报 — 当 g_signalAlert=true 且当前 chart 品种有持仓, 服务器时间整 15 分钟 (00/15/30/45) 推送一条实时盈亏; 发送渠道 SendNotification (MT5 推送 → 手机, 需在工具→选项→通知中配置 MetaQuotes ID) + Print 日志 (双通道); 不弹 Alert 避免每 15 分钟打断; 节流锁 g_lastPnLReportMin (上次发送的服务器分钟), 同一分钟内多次 OnTick 只发一次, 非整 15 分钟时清空; 盈亏 = profit + swap (持仓期间累计换仓费); 多品种支持: 每个 chart 跑一个 EA 实例, 仅播报当前 chart 品种, 不同 chart 自动播报不同品种; 消息格式 '[FibLimitAssist] SYMBOL P&L: ±X.XX USD (N 单)' 简洁一眼可读; 新增 CheckPnLReport() 函数, 在 OnTick 末尾调用 (CheckPullbackSignal 之后)"
 #property description "v2.01 HIDE 按钮不再隐藏 ADJUST 按钮: ApplyHidden 的 skip 列表新增 adjBtn (与 fvgBtn 同列) — ADJUST 是钉在右下角的一键调整快捷键, 隐藏时仍需可见; 修改 ApplyHidden 函数加 adjBtn 变量 + if 多加一个 || 条件; 改动 3 行 (1 行声明 + 1 行 skip 条件 + 1 行注释); 不影响 ADJUST 位置跟随 (UpdateAdjustButton 仍在 RefreshAll 显示分支被调, 早退分支未调, 这是 v1.91 设计 — HIDE 时 ADJUST 位置不变)"
 #property description "v2.02 修复 HIDE 后切周期 ADJUST/SIGNAL 按钮看不见的 bug: 根因是 RefreshAll 早退分支 (g_hidden=true) 不调 UpdateAdjustButton/UpdateSignalButtonPosition, CreateObjects 创建的 ADJUST/SIGNAL 停在默认 (0,0), 即使 ApplyHidden (v2.01) 跳过了它们, 也仍被其他 UI 遮挡看不见 — 用户报告 '点 HIDE 后切周期, ADJUST 看不见, 即使切回也看不见'。修复方案在早退分支 ApplyHidden() 之前补两行 UpdateAdjustButton() 和 UpdateSignalButtonPosition(), 显式重定位到正常位置。g_hidden 跨周期保留机制未在 SaveFibPositions 中显式实现 (仅 p1/p0/p79/p49 通过 GlobalVariable 持久化), 但 MQL5 全局变量在某些 MT5 切周期流程中可能保留, 这个修复是无害的冗余保护 — g_hidden=false 走显示分支时这两行不会被执行 (在 if 块内); 顺手也修了 SIGNAL 按钮 (同样靠 UpdateSignalButtonPosition 重定位)"
+#property description "v2.03 修复 v2.02 残留 bug: 点 HIDE 后切周期, 用户报告 'HIDE 按钮不见了, 在左上角好像有个 FVG 按钮, 不知道 HIDE 是否也挤在一起'。根因更深: v2.02 只补了 ADJUST/SIGNAL 的位置, 但 HIDE/FVG/RISK 三个底部按钮的位置是由 UpdateBottomButtons() 设置的, 而 UpdateHideButton/UpdateFVGButton/UpdateRiskButton 只更新文字/sticky 不改位置。早退分支 (g_hidden=true) 不调 UpdateBottomButtons → CreateObjects 重建后三个按钮挤在 (0,0) 重叠, FVG 露出半截, HIDE 被完全遮挡。第二个问题: ApplyHidden 的 skip 列表漏了 signalBtn, 切周期时 SIGNAL 按钮被移到屏幕外 (XDISTANCE=-10000), 加上 v2.02 的位置问题变成 '完全看不见'。修复: ① 早退分支补 UpdateBottomButtons() — HIDE/FVG/RISK 位置被强制重设到底部按钮行; ② 早退分支补 UpdateRiskButton() — 文字/sticky 与 HIDE/FVG 一致保持; ③ ApplyHidden skip 列表加 signalBtn — SIGNAL 不被移出屏幕; ④ 保留 v2.02 的 UpdateAdjustButton + 新增 UpdateSignalButtonPosition 显式重定位 (信号位置在右下角 UpdateBottomButtons 不管它); ⑤ 注释明确说明 'HIDE/FVG/RISK 由 UpdateBottomButtons 定位, SIGNAL 由 UpdateSignalButtonPosition 定位, ADJUST 由 UpdateAdjustButton 定位'。改动 6 处: ApplyHidden 1 行声明 + 1 行 skip 条件, RefreshAll 早退分支 4 行新增 (UpdateBottomButtons 1 + UpdateRiskButton 1 + UpdateSignalButtonPosition 1 + 注释)"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -1959,24 +1960,23 @@ void UpdateFVGDisplay()
 void ApplyHidden()
   {
    int total = ObjectsTotal(0, -1, -1);
-   string hideObj  = HideName();
-   string fvgBtn   = FVGButtonName();
-   string adjBtn   = AdjustName();   // v2.01: ADJUST 按钮独立于 HIDE — 钉在右下角的快捷键, HIDE 时仍需可见
+   string hideObj   = HideName();
+   string fvgBtn    = FVGButtonName();
+   string adjBtn    = AdjustName();      // v2.01: ADJUST 按钮独立于 HIDE
+   string signalBtn = SignalName();      // v2.03: SIGNAL 按钮独立于 HIDE — 与 ADJUST 同列的快捷键, HIDE 时仍需可见
    // v1.83: 删除 FillButtonName() — FILL 按钮已合并入 FVG 按钮, 不再独立
    for(int i = 0; i < total; i++)
      {
       string name = ObjectName(0, i, -1, -1);
       if(StringFind(name, g_prefix) != 0) continue;   // 仅本实例对象
       // v1.59: FVG 系列 (按钮 + 矩形 + 标签) 完全独立于 HIDE — HIDE 不动它
-      //   FVG 按钮: 仍可见 (用户主动切换显示用)
-      //   FVG 矩形: 仍可见 (作为独立的辅助图层)
-      //   FVG 标签: 仍可见
-      //   FVG 也是"独立于主 fib UI 的辅助图层"
       // v1.81: FILL 按钮同样独立于 HIDE — FVG 按钮的辅助开关, HIDE 不应影响
       // v1.83: FILL 按钮已合并入 FVG 按钮, 这里只跳过 fvgBtn 一个
       // v2.01: ADJUST 按钮 (钉在右下角) 同样独立于 HIDE — 用户随时调整 1.00/0.00 的快捷键
+      // v2.03: SIGNAL 按钮 (右下角) 同样独立于 HIDE — 报警开关, 隐藏时仍需可见
       if(name == fvgBtn
       || name == adjBtn
+      || name == signalBtn
       || StringFind(name, g_prefix + "FVG_R_") == 0
       || StringFind(name, g_prefix + "FVG_L_") == 0)
          continue;
@@ -2008,13 +2008,19 @@ void RefreshAll()
      {
       UpdateHideButton();   // 保持 SHOW 文字 + sticky 状态
       UpdateFVGButton();    // v1.45: FVG 按钮也保持文字/颜色/sticky 状态 (不依赖 EA 主线逻辑)
-      // v2.02: 早退分支补 UpdateAdjustButton/UpdateSignalButtonPosition — 切周期后 g_hidden 若仍为 true
-      //   (e.g. EA 全局变量在某些 MT5 切周期流程中保留, 或 EA 通过其他途径跨周期保留),
-      //   CreateObjects 创建的 ADJUST/SIGNAL 仍在 (0,0), 即使 ApplyHidden 跳过它们 (v2.01) 也会被其他按钮遮挡看不见。
-      //   在这里显式重定位到正常位置, 不管 g_hidden 是否跨周期保留都能保证 ADJUST/SIGNAL 可见。
+      UpdateRiskButton();   // v2.03: RISK 按钮文字/sticky 也保持 (与 HIDE/FVG 一致)
+      UpdateBottomButtons();   // v2.03: 修复 HIDE 切周期后 HIDE/FVG/RISK 按钮挤在 (0,0) 的 bug
+                              //   早退分支原本只调 UpdateHideButton/UpdateFVGButton (只改文字颜色, 不改位置)
+                              //   CreateObjects 重建按钮在默认 (0,0), 显示分支的 UpdateBottomButtons 不被调
+                              //   → 三个按钮挤在左上角重叠, HIDE 看不见, FVG 露出来。补 UpdateBottomButtons 后
+                              //   HIDE/FVG/RISK 位置被重新设置到底部按钮行, 不依赖显示分支。
+      // v2.02: 早退分支补 UpdateAdjustButton — 切周期后 g_hidden 若仍为 true
+      //   CreateObjects 创建的 ADJUST 仍在 (0,0), 即使 ApplyHidden 跳过它 (v2.01) 也会被其他按钮遮挡看不见。
+      // v2.03: 早退分支补 UpdateSignalButtonPosition — 与 ADJUST 同理, CreateObjects 创建的 SIGNAL 停在 (0,0)
+      //   即使 ApplyHidden 新加入 signalBtn 到 skip 列表 (v2.03), 仍会被其他按钮遮挡看不见
       UpdateAdjustButton();
       UpdateSignalButtonPosition();
-      ApplyHidden();        // 确保所有对象处于隐藏 (幂等)
+      ApplyHidden();        // 确保所有对象处于隐藏 (幂等); skip 列表含 hideObj/fvgBtn/adjBtn/signalBtn/FVG_R/FVG_L, 不会动它们
       ChartRedraw(0);
       return;
      }

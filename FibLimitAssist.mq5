@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.99"
-#property description "半自动斐波那契限价下单辅助 (v1.99)"
+#property version   "2.00"
+#property description "半自动斐波那契限价下单辅助 (v2.00)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -37,6 +37,7 @@
 #property description "v1.97 缩短仓位按钮文字 + 统一宽度: ① CALL 文字 → 'all', 宽 100→80 (与 EVEN 同宽); ② CHALF 文字 → 'half', 宽 80 不变; 顶部第二排三按钮 (EVEN/half/all) 宽全 80 — 但 X 计算早用 UI(80) 算 (v1.67 已统一), 实际位置不变, 仅 'all' 右沿缩进 20px (stepBox+256 → 比 v1.96 短 20px); g_btnX = w-UI(108) 不动, 仍作挂单列/盈亏比标签右对齐锚点 (该值与 CALL 实际宽度解耦, 因为 v1.65 起 CALL 位置按 stepBox 算而非按图表宽); 同步注释 UpdateButtonX / UpdateTopButtons 中 CALL 宽度的历史说明"
 #property description "v1.98 仓位按钮文字全部大写: 'all' → 'ALL', 'half' → 'HALF' (与 CANCEL/EVEN/RISK/HIDE 等其他按钮大小写风格保持一致 — 之前小写是为短文字配窄宽 80 节省视觉空间, 但用户反馈希望与 EVEN 等已有大写按钮对齐, 风格统一); 宽度仍 80 不变; tooltip 中文不受影响"
 #property description "v1.99 SIGNAL 总开关扩展: 共用按钮 (g_signalAlert) 现在驱动三类报警: ① 0.49 回调 (DIR 驱动 long/short, BID/ASK 双价探测, 与 v1.91 一致); ② 向上突破上界 g_p0 (任何方向, BID 跨上); ③ 向下突破下界 g_p1 (任何方向, BID 跨下); 新增两个独立的 fired 锁 g_breakUpFired/g_breakDownFired (与 g_pullbackFired 并列, 三类各自锁定, 互不阻塞); 边界 p1/p0 调整 (差异>_Point) 同时重置三个 fired + 强制下一 tick 重新采样 (避免边界刚改完立刻报警); ToggleSignalAlert 切换按钮时三个 fired 全重置; 报价选择: 0.49 回调沿用 DIR 驱动 BID/ASK (与 v1.91 兼容), 突破统一用 BID (保守报价 — BID 突破上界等价于市价已超过, BID 突破下界等价于市价已跌破); tooltip 改用 '①/②/③' 三条说明; g_prevSamplePrice 改为缓存 BID (原来是 DIR 决定, 现统一为 BID — 0.49 回调比较时 short 走 ASK, 偏差 = 点差, 仍能正确捕获跨价位)"
+#property description "v2.00 SIGNAL 总开关扩展第四类: 盈亏播报 — 当 g_signalAlert=true 且当前 chart 品种有持仓, 服务器时间整 15 分钟 (00/15/30/45) 推送一条实时盈亏; 发送渠道 SendNotification (MT5 推送 → 手机, 需在工具→选项→通知中配置 MetaQuotes ID) + Print 日志 (双通道); 不弹 Alert 避免每 15 分钟打断; 节流锁 g_lastPnLReportMin (上次发送的服务器分钟), 同一分钟内多次 OnTick 只发一次, 非整 15 分钟时清空; 盈亏 = profit + swap (持仓期间累计换仓费); 多品种支持: 每个 chart 跑一个 EA 实例, 仅播报当前 chart 品种, 不同 chart 自动播报不同品种; 消息格式 '[FibLimitAssist] SYMBOL P&L: ±X.XX USD (N 单)' 简洁一眼可读; 新增 CheckPnLReport() 函数, 在 OnTick 末尾调用 (CheckPullbackSignal 之后)"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -220,6 +221,7 @@ int               g_fvgState       = 0;
 //   g_breakDownFired: 本轮向下突破 p1 (下界) 是否已报警 (锁定)
 //   g_prevP1/g_prevP0: 上次 p1/p0 快照, 1 tick 内差异 > _Point 视为边界被调整 → 重置所有 fired 并重新采样
 //   g_signalAlert: 运行时开关 (MQL5 input 是常量, 不能运行时赋值; OnInit 从 InpSignalAlert 拷贝初始化, 按钮切换它)
+//   g_lastPnLReportMin: 盈亏播报节流锁 (上次发送的服务器分钟, -1 = 未锁; 非整15分钟时重置为-1, 避免重复发送)
 double            g_pullbackLevel    = 0.0;
 double            g_prevSamplePrice  = 0.0;
 bool              g_pullbackFired    = false;
@@ -228,6 +230,7 @@ bool              g_breakDownFired   = false;   // v1.99: 向下突破 p1 锁定
 double            g_prevP1           = 0.0;
 double            g_prevP0           = 0.0;
 bool              g_signalAlert      = false;
+int               g_lastPnLReportMin = -1;     // v2.00: 盈亏播报节流锁
 
 ENUM_TIMEFRAMES   g_higherTF      = PERIOD_H1;             // 实际生效的高级周期
 // FVG 单条记录 (检测 + 状态 紧凑存储)
@@ -1687,6 +1690,54 @@ void CheckPullbackSignal()
      }
 
    g_prevSamplePrice = pxBrk;
+  }
+
+// v2.00: 盈亏播报 — 共用 g_signalAlert 总开关
+//   触发条件: 服务器时间分钟 % 15 == 0 (即 00/15/30/45) 且当前 chart 品种有持仓
+//   节流: g_lastPnLReportMin 锁, 同一分钟内多次 OnTick 只发一次
+//   重置锁: 分钟 % 15 != 0 时清空锁, 等下一个 15 分钟边界重新触发
+//   发送渠道: SendNotification (MT5 推送 → 手机) + Print 日志; 不弹 Alert 避免每 15 分钟打断用户
+//   消息格式: "[FibLimitAssist] SYMBOL P&L: ±X.XX USD (N 单)" — 简洁, 一眼可读
+//   盈亏计算: profit + swap (持仓期间累计换仓费), 佣金在开仓时已扣, 不重复计入
+//   多品种支持: 每个 chart 跑一个 EA 实例, 仅播报当前 chart 品种 (POSITION_SYMBOL == _Symbol); 不同 chart 自动播报不同品种
+void CheckPnLReport()
+  {
+   if(!g_signalAlert)            return;   // 共用总开关
+   MqlDateTime tm;
+   if(!TimeCurrent(tm))          return;
+   int m = tm.min;
+
+   // 非整 15 分 → 重置锁, 等下一个边界 (00/15/30/45)
+   if(m % 15 != 0)
+     {
+      g_lastPnLReportMin = -1;
+      return;
+     }
+   if(m == g_lastPnLReportMin)    return;   // 本分钟已发
+   g_lastPnLReportMin = m;
+
+   // 遍历当前品种持仓, 累加 profit + swap
+   int    total   = PositionsTotal();
+   if(total <= 0)                 return;   // 无任何持仓 → 跳过 (即使关闭其他品种也只关注自己)
+   double netPnl  = 0.0;
+   int    cnt     = 0;
+   for(int i = 0; i < total; i++)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0)             continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;   // 仅当前 chart 品种
+      double p = PositionGetDouble(POSITION_PROFIT);
+      double s = PositionGetDouble(POSITION_SWAP);
+      netPnl += p + s;
+      cnt++;
+     }
+   if(cnt <= 0)                   return;   // 当前 chart 品种无持仓
+
+   string sign = (netPnl >= 0) ? "+" : "";
+   string msg  = StringFormat("[FibLimitAssist] %s P&L: %s%.2f USD (%d 单)",
+                              _Symbol, sign, netPnl, cnt);
+   if(!SendNotification(msg))     Print("[盈亏播报] 推送未送达 (需在 MT5 工具→选项→通知 中配置 MetaQuotes ID): ", msg);
+   Print("[盈亏播报] ", msg);
   }
 
 // v1.45: 主入口 — 检测 + 分类 + 绘制 FVG 矩形
@@ -3566,6 +3617,8 @@ void OnTick()
 
    // v1.91: 信号提醒 — 价格首次回调到区间 0.49 位置时弹窗+日志 (内部判断 g_signalAlert, 关闭时零开销)
    CheckPullbackSignal();
+   // v2.00: 盈亏播报 — 共用 g_signalAlert 总开关, 整 15 分钟 (00/15/30/45) 检查持仓并发送推送
+   CheckPnLReport();
   }
 
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)

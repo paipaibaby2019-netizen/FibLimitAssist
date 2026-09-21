@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "1.98"
-#property description "半自动斐波那契限价下单辅助 (v1.98)"
+#property version   "1.99"
+#property description "半自动斐波那契限价下单辅助 (v1.99)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -36,6 +36,7 @@
 #property description "v1.96 按用户要求统一按钮配色: ① SIGNAL 开状态由红 C'200,60,60' 改为黄 C'255,193,7' (直接复用 RISK 1% 的 CLR_RISK_MID, 暖色系提示监控中); ② EVEN/CHALF/CALL 三个仓位管理按钮由 蓝/橙红/橙 全部改为灰 C'120,120,120' (与 CANCEL 一致 — 5 个顶部按钮[CANCEL/CALL/CHALF/EVEN]全灰形成中性背景组, RISK/SIGNAL 用黄高亮突出当前档位/状态); 同步 CreateActionButton 三处 BGCOLOR 参数 + UpdateSignalButton 三元表达式的 SIGNAL 颜色"
 #property description "v1.97 缩短仓位按钮文字 + 统一宽度: ① CALL 文字 → 'all', 宽 100→80 (与 EVEN 同宽); ② CHALF 文字 → 'half', 宽 80 不变; 顶部第二排三按钮 (EVEN/half/all) 宽全 80 — 但 X 计算早用 UI(80) 算 (v1.67 已统一), 实际位置不变, 仅 'all' 右沿缩进 20px (stepBox+256 → 比 v1.96 短 20px); g_btnX = w-UI(108) 不动, 仍作挂单列/盈亏比标签右对齐锚点 (该值与 CALL 实际宽度解耦, 因为 v1.65 起 CALL 位置按 stepBox 算而非按图表宽); 同步注释 UpdateButtonX / UpdateTopButtons 中 CALL 宽度的历史说明"
 #property description "v1.98 仓位按钮文字全部大写: 'all' → 'ALL', 'half' → 'HALF' (与 CANCEL/EVEN/RISK/HIDE 等其他按钮大小写风格保持一致 — 之前小写是为短文字配窄宽 80 节省视觉空间, 但用户反馈希望与 EVEN 等已有大写按钮对齐, 风格统一); 宽度仍 80 不变; tooltip 中文不受影响"
+#property description "v1.99 SIGNAL 总开关扩展: 共用按钮 (g_signalAlert) 现在驱动三类报警: ① 0.49 回调 (DIR 驱动 long/short, BID/ASK 双价探测, 与 v1.91 一致); ② 向上突破上界 g_p0 (任何方向, BID 跨上); ③ 向下突破下界 g_p1 (任何方向, BID 跨下); 新增两个独立的 fired 锁 g_breakUpFired/g_breakDownFired (与 g_pullbackFired 并列, 三类各自锁定, 互不阻塞); 边界 p1/p0 调整 (差异>_Point) 同时重置三个 fired + 强制下一 tick 重新采样 (避免边界刚改完立刻报警); ToggleSignalAlert 切换按钮时三个 fired 全重置; 报价选择: 0.49 回调沿用 DIR 驱动 BID/ASK (与 v1.91 兼容), 突破统一用 BID (保守报价 — BID 突破上界等价于市价已超过, BID 突破下界等价于市价已跌破); tooltip 改用 '①/②/③' 三条说明; g_prevSamplePrice 改为缓存 BID (原来是 DIR 决定, 现统一为 BID — 0.49 回调比较时 short 走 ASK, 偏差 = 点差, 仍能正确捕获跨价位)"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -214,12 +215,16 @@ int               g_fvgState       = 0;
 // v1.91 新增: 信号提醒状态
 //   g_pullbackLevel: 报警价位 = g_p1 - 0.49*(g_p1 - g_p0), 每次 p1/p0 变化或按钮切换时重算
 //   g_prevSamplePrice: 上次 OnTick 采样的价格, 用于检测跨价位 (long: prev>level && now<=level)
-//   g_pullbackFired: 本轮是否已报警 (锁定, 直到 p1/p0 调整或按钮重置)
-//   g_prevP1/g_prevP0: 上次 p1/p0 快照, 1 tick 内差异 > _Point 视为边界被调整 → 重置 g_pullbackFired 并重新采样
+//   g_pullbackFired: 本轮 0.49 回调是否已报警 (锁定, 直到 p1/p0 调整或按钮重置)
+//   g_breakUpFired:   本轮向上突破 p0 (上界) 是否已报警 (锁定)
+//   g_breakDownFired: 本轮向下突破 p1 (下界) 是否已报警 (锁定)
+//   g_prevP1/g_prevP0: 上次 p1/p0 快照, 1 tick 内差异 > _Point 视为边界被调整 → 重置所有 fired 并重新采样
 //   g_signalAlert: 运行时开关 (MQL5 input 是常量, 不能运行时赋值; OnInit 从 InpSignalAlert 拷贝初始化, 按钮切换它)
 double            g_pullbackLevel    = 0.0;
 double            g_prevSamplePrice  = 0.0;
 bool              g_pullbackFired    = false;
+bool              g_breakUpFired     = false;   // v1.99: 向上突破 p0 锁定
+bool              g_breakDownFired   = false;   // v1.99: 向下突破 p1 锁定
 double            g_prevP1           = 0.0;
 double            g_prevP0           = 0.0;
 bool              g_signalAlert      = false;
@@ -505,6 +510,7 @@ bool CreateAdjustButton()
 
 // v1.91: 信号提醒开关按钮 — 2 态切换 SIGNAL/OFF (默认 OFF)
 //   位置由 UpdateSignalButtonPosition 设为原 ADJUST 位置 (LONG 右侧 4px, 与 SWAP/ADJUST/CANCEL 同 Y)
+//   v1.99 起该按钮为"三类报警"总开关: ①0.49 回调 ②向上突破上界 g_p0 ③向下突破下界 g_p1
 bool CreateSignalButton()
   {
    string name = SignalName();
@@ -523,9 +529,11 @@ bool CreateSignalButton()
    ObjectSetString (0, name, OBJPROP_TEXT,    "OFF");
    ObjectSetString(0, name, OBJPROP_FONT, "Arial");
    // v1.93: 用局部 string 变量承载多行 tooltip, 避免 MetaEditor 对连续字符串字面量的解析报错
-   string tip = "信号提醒 切换 (运行时): SIGNAL=开, OFF=关\n"
-                "· 价位 = 区间顶部回撤 49% (= g_p1 - 0.49×Range, 与可拖动的 0.49 线无关)\n"
-                "· 方向 = Dir() 自动判定 (DIR_UP=long, DIR_DOWN=short)\n"
+   // v1.99: tooltip 描述三类报警 (0.49 回调 + 突破上下界), 共用 g_signalAlert 开关
+   string tip = "信号提醒 总开关 (v1.99 共用三类): SIGNAL=开, OFF=关\n"
+                "· ① long 价格首次回调 (下跌) 到区间 0.49 位置报警\n"
+                "· ② 任何方向 向上突破上界 g_p0 报警\n"
+                "· ③ 任何方向 向下突破下界 g_p1 报警\n"
                 "· 首次跨价位报警一次后锁定, 直到边界调整或按钮重开";
    ObjectSetString(0, name, OBJPROP_TOOLTIP, tip);
    UpdateSignalButton();   // 同步文字/颜色/STICKY (依据 g_signalAlert 运行时值)
@@ -768,18 +776,20 @@ void UpdateSignalButtonPosition()
   }
 
 // v1.91: 切换信号提醒总开关 — OnChartEvent 收到 SIGNAL 按钮点击时调用
-//   切换运行时变量 g_signalAlert (input 不能改), 同时重置状态: g_pullbackFired=false, g_prevSamplePrice=0 (下一 tick 重新采样), g_prevP1/P0 重新初始化
+//   切换运行时变量 g_signalAlert (input 不能改), 同时重置状态: 三个 fired 全 false, g_prevSamplePrice=0 (下一 tick 重新采样), g_prevP1/P0 重新初始化
 void ToggleSignalAlert()
   {
-   g_signalAlert       = !g_signalAlert;
+   g_signalAlert      = !g_signalAlert;
    g_pullbackFired    = false;
+   g_breakUpFired     = false;   // v1.99: 突破上界锁
+   g_breakDownFired   = false;   // v1.99: 突破下界锁
    g_prevSamplePrice  = 0.0;    // 强制下一 tick 重新采样, 避免"按钮开瞬间就报警"
    g_prevP1           = g_p1;
    g_prevP0           = g_p0;
    g_pullbackLevel    = (g_p1 > 0 && g_p0 > 0) ? (g_p1 - 0.49 * (g_p1 - g_p0)) : 0.0;
    UpdateSignalButton();
    ChartRedraw(0);   // v1.94: 必须手动重绘 — AdvanceFVGState/ToggleHide 都有 (前者直接调, 后者经 RefreshAll), 这里不调导致 UpdateSignalButton 写入的 TEXT/BGCOLOR/STATE 不立即生效, 第一次点击视觉延迟到第二次才显示
-   Print("[信号提醒] ", g_signalAlert ? "已启用 (价位=" + DoubleToString(g_pullbackLevel, _Digits) + ")" : "已关闭");
+   Print("[信号提醒] ", g_signalAlert ? "已启用 (0.49 回调=" + DoubleToString(g_pullbackLevel, _Digits) + ", 突破上下界共用开关)" : "已关闭");
   }
 
 //+------------------------------------------------------------------+
@@ -1585,23 +1595,31 @@ string FVGLblName(datetime formTime, int tfMin)
   }
 
 // v1.91: 信号提醒主入口 — OnTick 每 tick 调用
-//   报警价位 = g_p1 - 0.49*(g_p1 - g_p0)  (从顶部回撤 49%, 与可拖动的 0.49 线无关)
-//   方向 = Dir() (DIR_UP=long 等价格从上方穿越到 ≤ level; DIR_DOWN=short 等价格从下方穿越到 ≥ level)
-//   "首次" = 跨价位那一 tick (prevSamplePrice 在 level 异侧, 当前价在 level 同侧), 报警一次后锁定
-//   锁定解除条件: ① p1/p0 调整 (>_Point); ② 按钮切换 (ToggleSignalAlert 重置状态)
+//   三类报警, 共享总开关 g_signalAlert, 三类相互独立的锁定:
+//     ① 0.49 回调报警 (Dir 驱动 long/short)
+//     ② 向上突破上界 (g_p0) — 不依赖 Dir, 任何时候价格穿越 p0 都报
+//     ③ 向下突破下界 (g_p1) — 不依赖 Dir, 任何时候价格穿越 p1 都报
+//   0.49 报警价位 = g_p1 - 0.49*(g_p1 - g_p0)  (从顶部回撤 49%, 与可拖动的 0.49 线无关)
+//   突破价位 = g_p0 (上界, 长 long 时是止盈, short 时是反向) / g_p1 (下界, 短 short 时是止损)
+//   "首次" = 跨价位那一 tick (prev 在异侧, 当前在同侧), 报警一次后该锁永久, 直到:
+//     - p1/p0 调整 (>_Point) → 三个 fired 全重置
+//     - 按钮切换 (ToggleSignalAlert 重置状态)
 //   边界变化检测: 与上次记录的 g_prevP1/g_prevP0 比较, 超过 _Point 视为用户拖动了 1.00/0.00 线
+//   报价选择: 0.49 回调沿用 DIR 驱动 BID/ASK (与原 v1.91 一致); 突破用 BID (保守报价)
 void CheckPullbackSignal()
   {
    if(!g_signalAlert)            return;   // 总开关关闭 → 零开销
    if(g_p1 <= 0 || g_p0 <= 0)     return;   // 边界未初始化
    if(MathAbs(g_p1 - g_p0) < _Point) return; // 区间过窄 (DIR_FLAT 等价)
 
-   // ① 边界变化检测 → 重置状态机
+   // ① 边界变化检测 → 重置全部三个 fired
    bool p1Changed = (MathAbs(g_p1 - g_prevP1) > _Point);
    bool p0Changed = (MathAbs(g_p0 - g_prevP0) > _Point);
    if(p1Changed || p0Changed)
      {
       g_pullbackFired    = false;
+      g_breakUpFired     = false;   // v1.99
+      g_breakDownFired   = false;   // v1.99
       g_prevSamplePrice  = 0.0;     // 强制下一 tick 重新采样, 避免"边界刚改完就立刻报警"
       g_prevP1           = g_p1;
       g_prevP0           = g_p0;
@@ -1610,37 +1628,65 @@ void CheckPullbackSignal()
       return;
      }
 
-   if(g_pullbackFired) return;     // 已锁定, 本轮不再报警
-
-   // ② 计算当前采样价 + 与上次比较
-   int dir = Dir();
+   // ② 计算当前采样价 (突破用 BID, 回调按 DIR 取 BID/ASK — 与原 v1.91 一致)
+   int    dir   = Dir();
    double level = g_p1 - 0.49 * (g_p1 - g_p0);
    g_pullbackLevel = level;
 
-   // long 看 BID (回调下跌穿越); short 看 ASK (反弹上涨穿越)
-   double px = (dir == DIR_UP) ? SymbolInfoDouble(_Symbol, SYMBOL_BID)
-                               : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   if(px <= 0) return;
+   double pxAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double pxBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   if(pxBid <= 0 || pxAsk <= 0) return;
+
+   // 突破检测价 = BID (保守: BID 突破上界等价于市价已超过, BID 突破下界等价于市价已跌破)
+   double pxBrk = pxBid;
 
    // ③ 首 tick 采样 (不评估, 避免"开关刚开就报警")
-   if(g_prevSamplePrice == 0.0) { g_prevSamplePrice = px; return; }
-
-   // ④ 跨价位检测
-   bool crossDown = (g_prevSamplePrice > level) && (px <= level);   // long
-   bool crossUp   = (g_prevSamplePrice < level) && (px >= level);   // short
-   bool crossed   = (dir == DIR_UP) ? crossDown :
-                    (dir == DIR_DOWN) ? crossUp : false;
-
-   if(crossed)
+   if(g_prevSamplePrice == 0.0)
      {
-      g_pullbackFired = true;
-      string dirStr = (dir == DIR_UP) ? "long" : "short";
-      string msg    = StringFormat("[FibLimitAssist] %s 价格首次回调到区间 0.49 位置: %.5f (区间顶=%.5f, 底=%.5f, Range=%.5f)",
-                                   dirStr, level, g_p1, g_p0, MathAbs(g_p1 - g_p0));
+      g_prevSamplePrice = pxBrk;
+      return;
+     }
+
+   // ④ 0.49 回调报警 (按 DIR 选择 BID/ASK, 与原 v1.91 完全一致)
+   if(!g_pullbackFired)
+     {
+      double pxDir = (dir == DIR_UP) ? pxBid : pxAsk;
+      bool crossDown = (g_prevSamplePrice > level) && (pxDir <= level);   // long
+      bool crossUp   = (g_prevSamplePrice < level) && (pxDir >= level);   // short
+      bool crossed   = (dir == DIR_UP) ? crossDown :
+                       (dir == DIR_DOWN) ? crossUp : false;
+      if(crossed)
+        {
+         g_pullbackFired = true;
+         string dirStr = (dir == DIR_UP) ? "long" : "short";
+         string msg    = StringFormat("[FibLimitAssist] %s 价格首次回调到区间 0.49 位置: %.5f (区间顶=%.5f, 底=%.5f, Range=%.5f)",
+                                      dirStr, level, g_p1, g_p0, MathAbs(g_p1 - g_p0));
+         Alert(msg);
+         Print("[信号提醒] ", msg);
+        }
+     }
+
+   // ⑤ v1.99: 向上突破上界 (g_p0) — 任何 tick BID 从 ≤p0 跳到 >p0 时报警
+   if(!g_breakUpFired && (g_prevSamplePrice <= g_p0) && (pxBrk > g_p0))
+     {
+      g_breakUpFired = true;
+      string msg = StringFormat("[FibLimitAssist] 价格向上突破上界 g_p0=%.5f (区间底=%.5f, Range=%.5f)",
+                                g_p0, g_p1, MathAbs(g_p1 - g_p0));
       Alert(msg);
       Print("[信号提醒] ", msg);
      }
-   g_prevSamplePrice = px;
+
+   // ⑥ v1.99: 向下突破下界 (g_p1) — 任何 tick BID 从 ≥p1 跳到 <p1 时报警
+   if(!g_breakDownFired && (g_prevSamplePrice >= g_p1) && (pxBrk < g_p1))
+     {
+      g_breakDownFired = true;
+      string msg = StringFormat("[FibLimitAssist] 价格向下突破下界 g_p1=%.5f (区间顶=%.5f, Range=%.5f)",
+                                g_p1, g_p0, MathAbs(g_p1 - g_p0));
+      Alert(msg);
+      Print("[信号提醒] ", msg);
+     }
+
+   g_prevSamplePrice = pxBrk;
   }
 
 // v1.45: 主入口 — 检测 + 分类 + 绘制 FVG 矩形

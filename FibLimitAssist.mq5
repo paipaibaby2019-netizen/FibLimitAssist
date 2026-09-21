@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "2.03"
-#property description "半自动斐波那契限价下单辅助 (v2.03)"
+#property version   "2.04"
+#property description "半自动斐波那契限价下单辅助 (v2.04)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -41,6 +41,7 @@
 #property description "v2.01 HIDE 按钮不再隐藏 ADJUST 按钮: ApplyHidden 的 skip 列表新增 adjBtn (与 fvgBtn 同列) — ADJUST 是钉在右下角的一键调整快捷键, 隐藏时仍需可见; 修改 ApplyHidden 函数加 adjBtn 变量 + if 多加一个 || 条件; 改动 3 行 (1 行声明 + 1 行 skip 条件 + 1 行注释); 不影响 ADJUST 位置跟随 (UpdateAdjustButton 仍在 RefreshAll 显示分支被调, 早退分支未调, 这是 v1.91 设计 — HIDE 时 ADJUST 位置不变)"
 #property description "v2.02 修复 HIDE 后切周期 ADJUST/SIGNAL 按钮看不见的 bug: 根因是 RefreshAll 早退分支 (g_hidden=true) 不调 UpdateAdjustButton/UpdateSignalButtonPosition, CreateObjects 创建的 ADJUST/SIGNAL 停在默认 (0,0), 即使 ApplyHidden (v2.01) 跳过了它们, 也仍被其他 UI 遮挡看不见 — 用户报告 '点 HIDE 后切周期, ADJUST 看不见, 即使切回也看不见'。修复方案在早退分支 ApplyHidden() 之前补两行 UpdateAdjustButton() 和 UpdateSignalButtonPosition(), 显式重定位到正常位置。g_hidden 跨周期保留机制未在 SaveFibPositions 中显式实现 (仅 p1/p0/p79/p49 通过 GlobalVariable 持久化), 但 MQL5 全局变量在某些 MT5 切周期流程中可能保留, 这个修复是无害的冗余保护 — g_hidden=false 走显示分支时这两行不会被执行 (在 if 块内); 顺手也修了 SIGNAL 按钮 (同样靠 UpdateSignalButtonPosition 重定位)"
 #property description "v2.03 修复 v2.02 残留 bug: 点 HIDE 后切周期, 用户报告 'HIDE 按钮不见了, 在左上角好像有个 FVG 按钮, 不知道 HIDE 是否也挤在一起'。根因更深: v2.02 只补了 ADJUST/SIGNAL 的位置, 但 HIDE/FVG/RISK 三个底部按钮的位置是由 UpdateBottomButtons() 设置的, 而 UpdateHideButton/UpdateFVGButton/UpdateRiskButton 只更新文字/sticky 不改位置。早退分支 (g_hidden=true) 不调 UpdateBottomButtons → CreateObjects 重建后三个按钮挤在 (0,0) 重叠, FVG 露出半截, HIDE 被完全遮挡。第二个问题: ApplyHidden 的 skip 列表漏了 signalBtn, 切周期时 SIGNAL 按钮被移到屏幕外 (XDISTANCE=-10000), 加上 v2.02 的位置问题变成 '完全看不见'。修复: ① 早退分支补 UpdateBottomButtons() — HIDE/FVG/RISK 位置被强制重设到底部按钮行; ② 早退分支补 UpdateRiskButton() — 文字/sticky 与 HIDE/FVG 一致保持; ③ ApplyHidden skip 列表加 signalBtn — SIGNAL 不被移出屏幕; ④ 保留 v2.02 的 UpdateAdjustButton + 新增 UpdateSignalButtonPosition 显式重定位 (信号位置在右下角 UpdateBottomButtons 不管它); ⑤ 注释明确说明 'HIDE/FVG/RISK 由 UpdateBottomButtons 定位, SIGNAL 由 UpdateSignalButtonPosition 定位, ADJUST 由 UpdateAdjustButton 定位'。改动 6 处: ApplyHidden 1 行声明 + 1 行 skip 条件, RefreshAll 早退分支 4 行新增 (UpdateBottomButtons 1 + UpdateRiskButton 1 + UpdateSignalButtonPosition 1 + 注释)"
+#property description "v2.04 修复 FVG 矩形不停闪烁的 bug: 根因是 UpdateFVGDisplay() 在 OnTick 中每 tick 都调用 (独立于 g_dirty), 导致: ① DetectFVG 每 tick 重建 FVGRecord 数组, 状态从 0 开始 (跨调用 'F 锁定' 失效); ② 可见区边界 FVG 在 tick 之间反复进出 Detect 集合, 触发 ObjectCreate/ObjectDelete → 视觉闪烁; ③ ClassifyFVGStatus 扫描的是已收线 K 线 (shift>=1), 输入在 K 线内不变, 每 tick 重做无意义。修复: 把 UpdateFVGDisplay() 从 line 3633 移到 if(g_dirty) 块内 (与 RefreshAll 并列), 仅在新柱收线或图表缩放/拖动时触发, 行为不变但消除闪烁。AdvanceFVGState (按钮切换 3 态) 仍然立即重绘; OnInit 启动时仍然重绘一次; 正常运行时只在 g_dirty 时重绘。改动 1 行 (UpdateFVGDisplay 从独立调用移到 g_dirty 块内)"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -3627,10 +3628,15 @@ void OnTick()
    datetime bt = iTime(_Symbol, _Period, 0);
    if(bt != lastBarTime) { lastBarTime = bt; g_dirty = true; }
 
-   if(g_dirty) { RefreshAll(); g_dirty = false; }
+   if(g_dirty) { RefreshAll(); g_dirty = false; UpdateFVGDisplay(); }   // v2.04: UpdateFVGDisplay 移到 g_dirty 块内
+                                                                                    //   原每 tick 调用导致 FVG 矩形闪烁:
+                                                                                    //   - DetectFVG 每 tick 重建 FVGRecord 数组, 状态从 0 开始
+                                                                                    //   - 可见区边界 FVG 在 tick 之间反复进出集合, 触发 create/delete → 视觉闪烁
+                                                                                    //   - ClassifyFVGStatus 的 if(status==2)return 仅在单次调用内有效, 跨调用 F 状态会重置
+                                                                                    //   - ClassifyFVGStatus 扫描的是已收线 K 线 (shift>=1), 与实时 tick 无关
+                                                                                    //   → FVG 检测/分类的输入在 K 线内不变, 每 tick 重做无意义
+                                                                                    //   移到 g_dirty 块 (新柱收线 + 图表缩放/拖动) 触发即可, 行为不变但消除闪烁
    else        { UpdatePnLDisplay(); UpdateRatioLabels(); UpdateSpreadDisplay(); ChartRedraw(0); }   // v1.08 PnL + v1.35 盈亏比 + v1.75 点差 — 每个 tick 都刷新, 不等新柱
-
-   UpdateFVGDisplay();  // v1.45 FVG 矩形 — 每 tick 实时判定 U→P→F (独立于 g_dirty)
 
    // v1.91: 信号提醒 — 价格首次回调到区间 0.49 位置时弹窗+日志 (内部判断 g_signalAlert, 关闭时零开销)
    CheckPullbackSignal();

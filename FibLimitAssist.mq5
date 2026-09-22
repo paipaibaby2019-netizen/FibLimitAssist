@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "2.04"
-#property description "半自动斐波那契限价下单辅助 (v2.04)"
+#property version   "2.05"
+#property description "半自动斐波那契限价下单辅助 (v2.05)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -42,6 +42,7 @@
 #property description "v2.02 修复 HIDE 后切周期 ADJUST/SIGNAL 按钮看不见的 bug: 根因是 RefreshAll 早退分支 (g_hidden=true) 不调 UpdateAdjustButton/UpdateSignalButtonPosition, CreateObjects 创建的 ADJUST/SIGNAL 停在默认 (0,0), 即使 ApplyHidden (v2.01) 跳过了它们, 也仍被其他 UI 遮挡看不见 — 用户报告 '点 HIDE 后切周期, ADJUST 看不见, 即使切回也看不见'。修复方案在早退分支 ApplyHidden() 之前补两行 UpdateAdjustButton() 和 UpdateSignalButtonPosition(), 显式重定位到正常位置。g_hidden 跨周期保留机制未在 SaveFibPositions 中显式实现 (仅 p1/p0/p79/p49 通过 GlobalVariable 持久化), 但 MQL5 全局变量在某些 MT5 切周期流程中可能保留, 这个修复是无害的冗余保护 — g_hidden=false 走显示分支时这两行不会被执行 (在 if 块内); 顺手也修了 SIGNAL 按钮 (同样靠 UpdateSignalButtonPosition 重定位)"
 #property description "v2.03 修复 v2.02 残留 bug: 点 HIDE 后切周期, 用户报告 'HIDE 按钮不见了, 在左上角好像有个 FVG 按钮, 不知道 HIDE 是否也挤在一起'。根因更深: v2.02 只补了 ADJUST/SIGNAL 的位置, 但 HIDE/FVG/RISK 三个底部按钮的位置是由 UpdateBottomButtons() 设置的, 而 UpdateHideButton/UpdateFVGButton/UpdateRiskButton 只更新文字/sticky 不改位置。早退分支 (g_hidden=true) 不调 UpdateBottomButtons → CreateObjects 重建后三个按钮挤在 (0,0) 重叠, FVG 露出半截, HIDE 被完全遮挡。第二个问题: ApplyHidden 的 skip 列表漏了 signalBtn, 切周期时 SIGNAL 按钮被移到屏幕外 (XDISTANCE=-10000), 加上 v2.02 的位置问题变成 '完全看不见'。修复: ① 早退分支补 UpdateBottomButtons() — HIDE/FVG/RISK 位置被强制重设到底部按钮行; ② 早退分支补 UpdateRiskButton() — 文字/sticky 与 HIDE/FVG 一致保持; ③ ApplyHidden skip 列表加 signalBtn — SIGNAL 不被移出屏幕; ④ 保留 v2.02 的 UpdateAdjustButton + 新增 UpdateSignalButtonPosition 显式重定位 (信号位置在右下角 UpdateBottomButtons 不管它); ⑤ 注释明确说明 'HIDE/FVG/RISK 由 UpdateBottomButtons 定位, SIGNAL 由 UpdateSignalButtonPosition 定位, ADJUST 由 UpdateAdjustButton 定位'。改动 6 处: ApplyHidden 1 行声明 + 1 行 skip 条件, RefreshAll 早退分支 4 行新增 (UpdateBottomButtons 1 + UpdateRiskButton 1 + UpdateSignalButtonPosition 1 + 注释)"
 #property description "v2.04 修复 FVG 矩形不停闪烁的 bug: 根因是 UpdateFVGDisplay() 在 OnTick 中每 tick 都调用 (独立于 g_dirty), 导致: ① DetectFVG 每 tick 重建 FVGRecord 数组, 状态从 0 开始 (跨调用 'F 锁定' 失效); ② 可见区边界 FVG 在 tick 之间反复进出 Detect 集合, 触发 ObjectCreate/ObjectDelete → 视觉闪烁; ③ ClassifyFVGStatus 扫描的是已收线 K 线 (shift>=1), 输入在 K 线内不变, 每 tick 重做无意义。修复: 把 UpdateFVGDisplay() 从 line 3633 移到 if(g_dirty) 块内 (与 RefreshAll 并列), 仅在新柱收线或图表缩放/拖动时触发, 行为不变但消除闪烁。AdvanceFVGState (按钮切换 3 态) 仍然立即重绘; OnInit 启动时仍然重绘一次; 正常运行时只在 g_dirty 时重绘。改动 1 行 (UpdateFVGDisplay 从独立调用移到 g_dirty 块内)"
+#property description "v2.05 修复 SIGNAL/HIDE 按钮跨周期被重置的 bug: 用户报告 '我在日周期设置好提醒后, 切换其他周期又切换回来, 提醒按钮复原了'。根因: SaveFibPositions() 只保存 p1/p0/p79/p49 四个价位, 没有保存 g_signalAlert 和 g_hidden; 切周期时 OnDeinit(reason=REASON_CHARTCHANGE) 调 SaveFibPositions → OnInit 在 LoadFibPositions 后被 InpSignalAlert 默认 false 覆盖 → 按钮复原为 OFF (同理 g_hidden 跨周期也丢状态, 用户可能还没注意到)。修复: 扩展 SaveFibPositions/LoadFibPositions 函数体, 把 g_hidden 和 g_signalAlert 用 GlobalVariableTemp + GlobalVariableSet 持久化 (按 g_prefix 区分, 与 fib 端点同样的会话内临时全局变量机制, 客户端重启自动清空); OnInit 中 LoadFibPositions 会覆盖 InpSignalAlert 默认值, 之后 CreateObjects + RefreshAll → UpdateHideButton/UpdateSignalButton 同步按钮视觉。布尔用 0.0/1.0 编码 double (GlobalVariable 只支持 double)。状态机变量 (g_pullbackFired/g_breakUpFired/g_breakDownFired/g_prevSamplePrice) 不持久化 — 切周期后重置是合理的 (重新等首次穿越)。改动 2 处: SaveFibPositions 末尾 2 行, LoadFibPositions 末尾 2 行"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -345,6 +346,13 @@ void SaveFibPositions()
    GlobalVariableTemp(g_prefix + "p0");   GlobalVariableSet(g_prefix + "p0",  g_p0);
    GlobalVariableTemp(g_prefix + "p79");  GlobalVariableSet(g_prefix + "p79", g_p79);
    GlobalVariableTemp(g_prefix + "p49");  GlobalVariableSet(g_prefix + "p49", g_p49);
+   // v2.05: HIDE + SIGNAL 跨周期持久化 — 与 fib 端点共用 SaveFibPositions 函数
+   //   切周期时 OnDeinit(reason=REASON_CHARTCHANGE) 调 SaveFibPositions 保存所有状态
+   //   → OnInit LoadFibPositions 恢复 → RefreshAll → UpdateHideButton/UpdateSignalButton 同步视觉
+   //   GlobalVariable 是 double, 用 0.0/1.0 编码 bool
+   //   GlobalVariableTemp 标记为临时 (客户端重启自动清理, 不污染 MT5 全局变量列表)
+   GlobalVariableTemp(g_prefix + "hide");   GlobalVariableSet(g_prefix + "hide",   g_hidden      ? 1.0 : 0.0);
+   GlobalVariableTemp(g_prefix + "signal");  GlobalVariableSet(g_prefix + "signal",  g_signalAlert ? 1.0 : 0.0);
   }
 bool LoadFibPositions()
   {
@@ -362,6 +370,11 @@ bool LoadFibPositions()
    else                                      g_p79 = TheoPrice(RATIO_079, g_p1, g_p0);
    if(GlobalVariableCheck(g_prefix + "p49")) g_p49 = GlobalVariableGet(g_prefix + "p49");
    else                                      g_p49 = TheoPrice(RATIO_049, g_p1, g_p0);
+   // v2.05: HIDE + SIGNAL 跨周期持久化恢复 — 与 SaveFibPositions 对称
+   //   缺失则保留 OnInit 中 g_signalAlert = InpSignalAlert 默认值 (用户首次运行或 MT5 重启清空)
+   //   if 判断内不强制设 false, 让用户能通过 InpSignalAlert 启动默认值控制
+   if(GlobalVariableCheck(g_prefix + "hide"))   g_hidden      = (GlobalVariableGet(g_prefix + "hide")   > 0.5);
+   if(GlobalVariableCheck(g_prefix + "signal"))  g_signalAlert = (GlobalVariableGet(g_prefix + "signal")  > 0.5);
    return true;
   }
 

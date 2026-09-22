@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "2.05"
-#property description "半自动斐波那契限价下单辅助 (v2.05)"
+#property version   "2.06"
+#property description "半自动斐波那契限价下单辅助 (v2.06)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -43,6 +43,7 @@
 #property description "v2.03 修复 v2.02 残留 bug: 点 HIDE 后切周期, 用户报告 'HIDE 按钮不见了, 在左上角好像有个 FVG 按钮, 不知道 HIDE 是否也挤在一起'。根因更深: v2.02 只补了 ADJUST/SIGNAL 的位置, 但 HIDE/FVG/RISK 三个底部按钮的位置是由 UpdateBottomButtons() 设置的, 而 UpdateHideButton/UpdateFVGButton/UpdateRiskButton 只更新文字/sticky 不改位置。早退分支 (g_hidden=true) 不调 UpdateBottomButtons → CreateObjects 重建后三个按钮挤在 (0,0) 重叠, FVG 露出半截, HIDE 被完全遮挡。第二个问题: ApplyHidden 的 skip 列表漏了 signalBtn, 切周期时 SIGNAL 按钮被移到屏幕外 (XDISTANCE=-10000), 加上 v2.02 的位置问题变成 '完全看不见'。修复: ① 早退分支补 UpdateBottomButtons() — HIDE/FVG/RISK 位置被强制重设到底部按钮行; ② 早退分支补 UpdateRiskButton() — 文字/sticky 与 HIDE/FVG 一致保持; ③ ApplyHidden skip 列表加 signalBtn — SIGNAL 不被移出屏幕; ④ 保留 v2.02 的 UpdateAdjustButton + 新增 UpdateSignalButtonPosition 显式重定位 (信号位置在右下角 UpdateBottomButtons 不管它); ⑤ 注释明确说明 'HIDE/FVG/RISK 由 UpdateBottomButtons 定位, SIGNAL 由 UpdateSignalButtonPosition 定位, ADJUST 由 UpdateAdjustButton 定位'。改动 6 处: ApplyHidden 1 行声明 + 1 行 skip 条件, RefreshAll 早退分支 4 行新增 (UpdateBottomButtons 1 + UpdateRiskButton 1 + UpdateSignalButtonPosition 1 + 注释)"
 #property description "v2.04 修复 FVG 矩形不停闪烁的 bug: 根因是 UpdateFVGDisplay() 在 OnTick 中每 tick 都调用 (独立于 g_dirty), 导致: ① DetectFVG 每 tick 重建 FVGRecord 数组, 状态从 0 开始 (跨调用 'F 锁定' 失效); ② 可见区边界 FVG 在 tick 之间反复进出 Detect 集合, 触发 ObjectCreate/ObjectDelete → 视觉闪烁; ③ ClassifyFVGStatus 扫描的是已收线 K 线 (shift>=1), 输入在 K 线内不变, 每 tick 重做无意义。修复: 把 UpdateFVGDisplay() 从 line 3633 移到 if(g_dirty) 块内 (与 RefreshAll 并列), 仅在新柱收线或图表缩放/拖动时触发, 行为不变但消除闪烁。AdvanceFVGState (按钮切换 3 态) 仍然立即重绘; OnInit 启动时仍然重绘一次; 正常运行时只在 g_dirty 时重绘。改动 1 行 (UpdateFVGDisplay 从独立调用移到 g_dirty 块内)"
 #property description "v2.05 修复 SIGNAL/HIDE 按钮跨周期被重置的 bug: 用户报告 '我在日周期设置好提醒后, 切换其他周期又切换回来, 提醒按钮复原了'。根因: SaveFibPositions() 只保存 p1/p0/p79/p49 四个价位, 没有保存 g_signalAlert 和 g_hidden; 切周期时 OnDeinit(reason=REASON_CHARTCHANGE) 调 SaveFibPositions → OnInit 在 LoadFibPositions 后被 InpSignalAlert 默认 false 覆盖 → 按钮复原为 OFF (同理 g_hidden 跨周期也丢状态, 用户可能还没注意到)。修复: 扩展 SaveFibPositions/LoadFibPositions 函数体, 把 g_hidden 和 g_signalAlert 用 GlobalVariableTemp + GlobalVariableSet 持久化 (按 g_prefix 区分, 与 fib 端点同样的会话内临时全局变量机制, 客户端重启自动清空); OnInit 中 LoadFibPositions 会覆盖 InpSignalAlert 默认值, 之后 CreateObjects + RefreshAll → UpdateHideButton/UpdateSignalButton 同步按钮视觉。布尔用 0.0/1.0 编码 double (GlobalVariable 只支持 double)。状态机变量 (g_pullbackFired/g_breakUpFired/g_breakDownFired/g_prevSamplePrice) 不持久化 — 切周期后重置是合理的 (重新等首次穿越)。改动 2 处: SaveFibPositions 末尾 2 行, LoadFibPositions 末尾 2 行"
+#property description "v2.06 SIGNAL 三类报警新增手机推送: 用户报告 'PC 端配置正常, 测试消息可发, alert/experts 日志正常, 但 journal 里没看到 notification 相关消息, 手机收不到推送'。根因: SIGNAL 触发的三类报警 (0.49 回调 / 突破上界 g_p0 / 突破下界 g_p1) 只用 Alert() + Print(), 从未调用 SendNotification() — 整个 EA 只有 CheckPnLReport (盈亏播报, 整 15 分钟 + 有持仓时) 推过一次, 这就是 journal 里看不到 notification 的原因。修复: 在三类报警的 Alert+Print 之后追加 SendNotification(msg), 失败时 Print 错误提示 (PC 端默认 MetaQuotes ID, 与测试消息同 ID, 所以推送通道本身没问题 — 是代码根本没调)。防重复推送沿用 fired 锁 (g_pullbackFired/g_breakUpFired/g_breakDownFired) — Alert/Print/SendNotification 三通道在同一 if 分支内, fired 一锁全锁, 不需要新增独立的 sent 锁 (避免过度设计)。MT5 SendNotification 限制: 同一消息 5 秒内自动去重, 每秒最多 1 条 — 三类报警消息格式不同, 不会冲突。改动 4 处: CheckPullbackSignal ④⑤⑥ 三处报警后追加 SendNotification (各 2 行, 含失败日志); ToggleSignalAlert 注释更新 (fired 已覆盖推送锁); 全局变量注释更新 (fired 同步锁三通道); 版本号 + 描述。无需新增变量, 无需持久化"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -221,9 +222,9 @@ int               g_fvgState       = 0;
 // v1.91 新增: 信号提醒状态
 //   g_pullbackLevel: 报警价位 = g_p1 - 0.49*(g_p1 - g_p0), 每次 p1/p0 变化或按钮切换时重算
 //   g_prevSamplePrice: 上次 OnTick 采样的价格, 用于检测跨价位 (long: prev>level && now<=level)
-//   g_pullbackFired: 本轮 0.49 回调是否已报警 (锁定, 直到 p1/p0 调整或按钮重置)
-//   g_breakUpFired:   本轮向上突破 p0 (上界) 是否已报警 (锁定)
-//   g_breakDownFired: 本轮向下突破 p1 (下界) 是否已报警 (锁定)
+//   g_pullbackFired: 本轮 0.49 回调是否已报警 (锁定, 直到 p1/p0 调整或按钮重置) — 同时锁 Alert/Print/SendNotification 三通道
+//   g_breakUpFired:   本轮向上突破 p0 (上界) 是否已报警 (锁定) — 同时锁三通道
+//   g_breakDownFired: 本轮向下突破 p1 (下界) 是否已报警 (锁定) — 同时锁三通道
 //   g_prevP1/g_prevP0: 上次 p1/p0 快照, 1 tick 内差异 > _Point 视为边界被调整 → 重置所有 fired 并重新采样
 //   g_signalAlert: 运行时开关 (MQL5 input 是常量, 不能运行时赋值; OnInit 从 InpSignalAlert 拷贝初始化, 按钮切换它)
 //   g_lastPnLReportMin: 盈亏播报节流锁 (上次发送的服务器分钟, -1 = 未锁; 非整15分钟时重置为-1, 避免重复发送)
@@ -797,6 +798,7 @@ void UpdateSignalButtonPosition()
 
 // v1.91: 切换信号提醒总开关 — OnChartEvent 收到 SIGNAL 按钮点击时调用
 //   切换运行时变量 g_signalAlert (input 不能改), 同时重置状态: 三个 fired 全 false, g_prevSamplePrice=0 (下一 tick 重新采样), g_prevP1/P0 重新初始化
+//   v2.06: 三个 fired 已覆盖 Alert/Print/SendNotification 三通道, 无需额外推送锁
 void ToggleSignalAlert()
   {
    g_signalAlert      = !g_signalAlert;
@@ -1683,6 +1685,10 @@ void CheckPullbackSignal()
                                       dirStr, level, g_p1, g_p0, MathAbs(g_p1 - g_p0));
          Alert(msg);
          Print("[信号提醒] ", msg);
+         // v2.06: 推送到手机 — 与 Alert/Print 同分支, fired 锁防重复推送 (同 tick 不会再次进入此 if)
+         //   需在 MT5 工具→选项→通知 中配置 MetaQuotes ID (PC 端默认 ID); 测试消息可发但 SIGNAL 不推 = 没调 SendNotification
+         if(!SendNotification(msg))
+            Print("[信号提醒] 推送未送达 (需在 MT5 工具→选项→通知 中配置 MetaQuotes ID): ", msg);
         }
      }
 
@@ -1694,6 +1700,9 @@ void CheckPullbackSignal()
                                 g_p0, g_p1, MathAbs(g_p1 - g_p0));
       Alert(msg);
       Print("[信号提醒] ", msg);
+      // v2.06: 推送到手机 — 注释同 ④
+      if(!SendNotification(msg))
+         Print("[信号提醒] 推送未送达 (需在 MT5 工具→选项→通知 中配置 MetaQuotes ID): ", msg);
      }
 
    // ⑥ v1.99: 向下突破下界 (g_p1) — 任何 tick BID 从 ≥p1 跳到 <p1 时报警
@@ -1704,6 +1713,9 @@ void CheckPullbackSignal()
                                 g_p1, g_p0, MathAbs(g_p1 - g_p0));
       Alert(msg);
       Print("[信号提醒] ", msg);
+      // v2.06: 推送到手机 — 注释同 ④
+      if(!SendNotification(msg))
+         Print("[信号提醒] 推送未送达 (需在 MT5 工具→选项→通知 中配置 MetaQuotes ID): ", msg);
      }
 
    g_prevSamplePrice = pxBrk;

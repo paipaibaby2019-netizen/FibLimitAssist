@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "2.07"
-#property description "半自动斐波那契限价下单辅助 (v2.07)"
+#property version   "2.08"
+#property description "半自动斐波那契限价下单辅助 (v2.08)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -45,6 +45,7 @@
 #property description "v2.05 修复 SIGNAL/HIDE 按钮跨周期被重置的 bug: 用户报告 '我在日周期设置好提醒后, 切换其他周期又切换回来, 提醒按钮复原了'。根因: SaveFibPositions() 只保存 p1/p0/p79/p49 四个价位, 没有保存 g_signalAlert 和 g_hidden; 切周期时 OnDeinit(reason=REASON_CHARTCHANGE) 调 SaveFibPositions → OnInit 在 LoadFibPositions 后被 InpSignalAlert 默认 false 覆盖 → 按钮复原为 OFF (同理 g_hidden 跨周期也丢状态, 用户可能还没注意到)。修复: 扩展 SaveFibPositions/LoadFibPositions 函数体, 把 g_hidden 和 g_signalAlert 用 GlobalVariableTemp + GlobalVariableSet 持久化 (按 g_prefix 区分, 与 fib 端点同样的会话内临时全局变量机制, 客户端重启自动清空); OnInit 中 LoadFibPositions 会覆盖 InpSignalAlert 默认值, 之后 CreateObjects + RefreshAll → UpdateHideButton/UpdateSignalButton 同步按钮视觉。布尔用 0.0/1.0 编码 double (GlobalVariable 只支持 double)。状态机变量 (g_pullbackFired/g_breakUpFired/g_breakDownFired/g_prevSamplePrice) 不持久化 — 切周期后重置是合理的 (重新等首次穿越)。改动 2 处: SaveFibPositions 末尾 2 行, LoadFibPositions 末尾 2 行"
 #property description "v2.06 SIGNAL 三类报警新增手机推送: 用户报告 'PC 端配置正常, 测试消息可发, alert/experts 日志正常, 但 journal 里没看到 notification 相关消息, 手机收不到推送'。根因: SIGNAL 触发的三类报警 (0.49 回调 / 突破上界 g_p0 / 突破下界 g_p1) 只用 Alert() + Print(), 从未调用 SendNotification() — 整个 EA 只有 CheckPnLReport (盈亏播报, 整 15 分钟 + 有持仓时) 推过一次, 这就是 journal 里看不到 notification 的原因。修复: 在三类报警的 Alert+Print 之后追加 SendNotification(msg), 失败时 Print 错误提示 (PC 端默认 MetaQuotes ID, 与测试消息同 ID, 所以推送通道本身没问题 — 是代码根本没调)。防重复推送沿用 fired 锁 (g_pullbackFired/g_breakUpFired/g_breakDownFired) — Alert/Print/SendNotification 三通道在同一 if 分支内, fired 一锁全锁, 不需要新增独立的 sent 锁 (避免过度设计)。MT5 SendNotification 限制: 同一消息 5 秒内自动去重, 每秒最多 1 条 — 三类报警消息格式不同, 不会冲突。改动 4 处: CheckPullbackSignal ④⑤⑥ 三处报警后追加 SendNotification (各 2 行, 含失败日志); ToggleSignalAlert 注释更新 (fired 已覆盖推送锁); 全局变量注释更新 (fired 同步锁三通道); 版本号 + 描述。无需新增变量, 无需持久化"
 #property description "v2.07 SIGNAL 三类报警措辞改为方向中性 (与 LONG/SHORT 无关): 用户报告 '刚刚收到一条推送 价格向上突破上界 g_p0=157.20400 (区间底=157.31500), 为什么上界比区间底还低?'。根因: 三类报警的措辞 '上界 g_p0 / 下界 g_p1 / 区间顶 g_p0 / 区间底 g_p1' 是 LONG 视角写死的 (假设 g_p1<g_p0 即 1.00 在下=low, 0.00 在上=high); 但 SWAP 按钮切换为 SHORT 模式后 g_p1>g_p0 (1.00 在上=high, 0.00 在下=low), 此时消息里的 '上界 g_p0' 实际是下界, '区间底 g_p1' 实际是上界 — 数值反了。v1.99 设计原意就是 '不依赖 Dir, 任何方向都报', 但措辞却用了 LONG 视角的术语, 是 v1.99 留下的措辞漏洞 (v2.06 把同样的错措辞一并推送到了手机)。修复: 把 '上界 g_p0 / 下界 g_p1 / 区间顶 g_p0 / 区间底 g_p1' 统一替换为方向中性的 '0.00 端点 / 1.00 端点 / 对端' 措辞 — 端点名只与 fib 系数绑定, 与 SWAP 后的视觉上下无关。'向上突破/向下突破' 也改为 '向上穿越/向下穿越' (中性描述, 不暗示哪边是上哪边是下)。Range 仍保留 (区间宽度与方向无关)。改动 6 处: 3 处消息文本 (0.49 回调/向上穿越/向下穿越) + 3 处对应注释 (CheckPullbackSignal 函数头注释 + ⑤⑥ 块注释)。无逻辑变化, 无新增变量, 无持久化"
+#property description "v2.08 SIGNAL 突破检测阈值改为 max/min(g_p1,g_p0), 措辞改为 '突破区间上沿/下沿': v2.07 修复了措辞 ('端点名' 中性化) 但没改检测阈值 — SHORT 模式下 pxBrk > g_p0 等于 '价格向上穿过下沿' 却报 '向上穿越 0.00 端点', 阈值语义仍与消息措辞矛盾。用户反馈 '描述还是有问题, 不管 long/short, 价格高的为上沿, 价格低的为下沿, 统一为突破区间上沿/下沿'。v2.08 修复: ① 检测阈值从 g_p0/g_p1 改为 highEdge=max(g_p1,g_p0)/lowEdge=min(g_p1,g_p0) — '上沿/下沿' 按当前数值高低动态判定, 不再依赖端点 fib 系数或 SWAP 状态; ② 措辞从 '0.00 端点/1.00 端点' 改为 '区间上沿/区间下沿' (用户指定, 比端点名更直观); ③ '穿越' 改回 '突破' (用户指定, 配合区间沿措辞); ④ 0.49 回调消息也改用 highEdge/lowEdge (虽然 0.49 回调本身没这个问题, 但消息中显示的两个端点信息用 '上沿/下沿' 更一致); ⑤ g_breakUpFired 语义从 '突破 g_p0' 改为 '突破 highEdge', g_breakDownFired 类似。改动 6 处: CheckPullbackSignal 函数头注释 1 处 + 0.49 回调消息 1 处 (新增 highEdge/lowEdge 局部变量) + 向上穿越注释+阈值+消息 3 处 + 向下穿越注释+阈值+消息 3 处。新增 4 个临时 double (highEdge/lowEdge/range 共用, 每个 if 块内声明)"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -1620,11 +1621,11 @@ string FVGLblName(datetime formTime, int tfMin)
 // v1.91: 信号提醒主入口 — OnTick 每 tick 调用
 //   三类报警, 共享总开关 g_signalAlert, 三类相互独立的锁定:
 //     ① 0.49 回调报警 (Dir 驱动 long/short)
-//     ② 向上穿越 0.00 端点 (g_p0) — 不依赖 Dir, 任何时候价格穿越 p0 都报
-//     ③ 向下穿越 1.00 端点 (g_p1) — 不依赖 Dir, 任何时候价格穿越 p1 都报
+//     ② 突破区间上沿 (highEdge=max(p1,p0)) — 价格从 ≤highEdge 跳到 >highEdge 时报
+//     ③ 突破区间下沿 (lowEdge =min(p1,p0)) — 价格从 ≥lowEdge  跳到 <lowEdge  时报
 //   0.49 报警价位 = g_p1 - 0.49*(g_p1 - g_p0)  (从顶部回撤 49%, 与可拖动的 0.49 线无关)
-//   突破价位 = g_p0 (0.00 端点) / g_p1 (1.00 端点) — 端点名与 SWAP 后视觉上下无关 (v2.07 改为方向中性措辞)
-//   v2.07: 措辞统一为 "0.00 端点 / 1.00 端点", 不再用 LONG 视角的 "上界/下界/区间顶/区间底" — SHORT 模式下 g_p0 是下界但仍叫 "0.00 端点"
+//   v2.08: 突破阈值从 g_p0/g_p1 改为 highEdge/lowEdge — 旧阈值在 SHORT 模式下 pxBrk>g_p0 等于 "价格向上穿过下沿" 却报 "突破上界", 与消息措辞矛盾
+//   v2.08: 措辞 "上沿/下沿" 按 max/min 动态判定 (价格高的为上沿, 低的为下沿) — 不再依赖端点 fib 系数或 SWAP 状态
 //   "首次" = 跨价位那一 tick (prev 在异侧, 当前在同侧), 报警一次后该锁永久, 直到:
 //     - p1/p0 调整 (>_Point) → 三个 fired 全重置
 //     - 按钮切换 (ToggleSignalAlert 重置状态)
@@ -1681,10 +1682,14 @@ void CheckPullbackSignal()
                        (dir == DIR_DOWN) ? crossUp : false;
       if(crossed)
         {
+         string dirStr   = (dir == DIR_UP) ? "long" : "short";
+         // v2.08: 消息中端点信息改用 highEdge/lowEdge (动态按 max/min, 与 LONG/SHORT 无关)
+         double highEdge = MathMax(g_p1, g_p0);
+         double lowEdge  = MathMin(g_p1, g_p0);
+         double range    = MathAbs(g_p1 - g_p0);
          g_pullbackFired = true;
-         string dirStr = (dir == DIR_UP) ? "long" : "short";
-         string msg    = StringFormat("[FibLimitAssist] %s 价格首次回调到区间 0.49 位置: %.5f (1.00 端点=%.5f, 0.00 端点=%.5f, Range=%.5f)",
-                                      dirStr, level, g_p1, g_p0, MathAbs(g_p1 - g_p0));
+         string msg      = StringFormat("[FibLimitAssist] %s 价格首次回调到区间 0.49 位置: %.5f (区间上沿=%.5f, 下沿=%.5f, Range=%.5f)",
+                                         dirStr, level, highEdge, lowEdge, range);
          Alert(msg);
          Print("[信号提醒] ", msg);
          // v2.06: 推送到手机 — 与 Alert/Print 同分支, fired 锁防重复推送 (同 tick 不会再次进入此 if)
@@ -1694,13 +1699,17 @@ void CheckPullbackSignal()
         }
      }
 
-   // ⑤ v1.99: 向上穿越 0.00 端点 (g_p0) — 任何 tick BID 从 ≤p0 跳到 >p0 时报警
-   //   v2.07: 措辞 "上界" → "0.00 端点" (方向中性, 不暗示 LONG/SHORT 时哪边是上)
-   if(!g_breakUpFired && (g_prevSamplePrice <= g_p0) && (pxBrk > g_p0))
+   // ⑤ v1.99: 突破区间上沿 (highEdge=max(p1,p0)) — 任何 tick BID 从 ≤highEdge 跳到 >highEdge 时报警
+   //   v2.08: 阈值从 g_p0 改为 highEdge — 旧阈值 SHORT 模式下 pxBrk>g_p0 等于 "穿过下沿", 与消息措辞矛盾
+   //   v2.08: 措辞 "穿越 0.00 端点" → "突破区间上沿" (按 max 动态判定, 不依赖 fib 系数/SWAP)
+   double highEdge = MathMax(g_p1, g_p0);
+   double lowEdge  = MathMin(g_p1, g_p0);
+   double range    = MathAbs(g_p1 - g_p0);
+   if(!g_breakUpFired && (g_prevSamplePrice <= highEdge) && (pxBrk > highEdge))
      {
       g_breakUpFired = true;
-      string msg = StringFormat("[FibLimitAssist] 价格向上穿越 0.00 端点 g_p0=%.5f (1.00 端点=%.5f, Range=%.5f)",
-                                g_p0, g_p1, MathAbs(g_p1 - g_p0));
+      string msg = StringFormat("[FibLimitAssist] 突破区间上沿, 价格: %.5f (下沿=%.5f, Range=%.5f)",
+                                pxBrk, lowEdge, range);
       Alert(msg);
       Print("[信号提醒] ", msg);
       // v2.06: 推送到手机 — 注释同 ④
@@ -1708,13 +1717,15 @@ void CheckPullbackSignal()
          Print("[信号提醒] 推送未送达 (需在 MT5 工具→选项→通知 中配置 MetaQuotes ID): ", msg);
      }
 
-   // ⑥ v1.99: 向下穿越 1.00 端点 (g_p1) — 任何 tick BID 从 ≥p1 跳到 <p1 时报警
-   //   v2.07: 措辞 "下界" → "1.00 端点" (方向中性, 不暗示 LONG/SHORT 时哪边是下)
-   if(!g_breakDownFired && (g_prevSamplePrice >= g_p1) && (pxBrk < g_p1))
+   // ⑥ v1.99: 突破区间下沿 (lowEdge=min(p1,p0)) — 任何 tick BID 从 ≥lowEdge 跳到 <lowEdge 时报警
+   //   v2.08: 阈值从 g_p1 改为 lowEdge — 旧阈值 SHORT 模式下 pxBrk<g_p1 等于 "穿过上沿", 与消息措辞矛盾
+   //   v2.08: 措辞 "穿越 1.00 端点" → "突破区间下沿" (按 min 动态判定, 不依赖 fib 系数/SWAP)
+   //   highEdge/lowEdge/range 在 ⑤ 块已声明 (函数体作用域), 直接复用
+   if(!g_breakDownFired && (g_prevSamplePrice >= lowEdge) && (pxBrk < lowEdge))
      {
       g_breakDownFired = true;
-      string msg = StringFormat("[FibLimitAssist] 价格向下穿越 1.00 端点 g_p1=%.5f (0.00 端点=%.5f, Range=%.5f)",
-                                g_p1, g_p0, MathAbs(g_p1 - g_p0));
+      string msg = StringFormat("[FibLimitAssist] 突破区间下沿, 价格: %.5f (上沿=%.5f, Range=%.5f)",
+                                pxBrk, highEdge, range);
       Alert(msg);
       Print("[信号提醒] ", msg);
       // v2.06: 推送到手机 — 注释同 ④

@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "2.09"
-#property description "半自动斐波那契限价下单辅助 (v2.09)"
+#property version   "2.10"
+#property description "半自动斐波那契限价下单辅助 (v2.10)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -47,6 +47,7 @@
 #property description "v2.07 SIGNAL 三类报警措辞改为方向中性 (与 LONG/SHORT 无关): 用户报告 '刚刚收到一条推送 价格向上突破上界 g_p0=157.20400 (区间底=157.31500), 为什么上界比区间底还低?'。根因: 三类报警的措辞 '上界 g_p0 / 下界 g_p1 / 区间顶 g_p0 / 区间底 g_p1' 是 LONG 视角写死的 (假设 g_p1<g_p0 即 1.00 在下=low, 0.00 在上=high); 但 SWAP 按钮切换为 SHORT 模式后 g_p1>g_p0 (1.00 在上=high, 0.00 在下=low), 此时消息里的 '上界 g_p0' 实际是下界, '区间底 g_p1' 实际是上界 — 数值反了。v1.99 设计原意就是 '不依赖 Dir, 任何方向都报', 但措辞却用了 LONG 视角的术语, 是 v1.99 留下的措辞漏洞 (v2.06 把同样的错措辞一并推送到了手机)。修复: 把 '上界 g_p0 / 下界 g_p1 / 区间顶 g_p0 / 区间底 g_p1' 统一替换为方向中性的 '0.00 端点 / 1.00 端点 / 对端' 措辞 — 端点名只与 fib 系数绑定, 与 SWAP 后的视觉上下无关。'向上突破/向下突破' 也改为 '向上穿越/向下穿越' (中性描述, 不暗示哪边是上哪边是下)。Range 仍保留 (区间宽度与方向无关)。改动 6 处: 3 处消息文本 (0.49 回调/向上穿越/向下穿越) + 3 处对应注释 (CheckPullbackSignal 函数头注释 + ⑤⑥ 块注释)。无逻辑变化, 无新增变量, 无持久化"
 #property description "v2.08 SIGNAL 突破检测阈值改为 max/min(g_p1,g_p0), 措辞改为 '突破区间上沿/下沿': v2.07 修复了措辞 ('端点名' 中性化) 但没改检测阈值 — SHORT 模式下 pxBrk > g_p0 等于 '价格向上穿过下沿' 却报 '向上穿越 0.00 端点', 阈值语义仍与消息措辞矛盾。用户反馈 '描述还是有问题, 不管 long/short, 价格高的为上沿, 价格低的为下沿, 统一为突破区间上沿/下沿'。v2.08 修复: ① 检测阈值从 g_p0/g_p1 改为 highEdge=max(g_p1,g_p0)/lowEdge=min(g_p1,g_p0) — '上沿/下沿' 按当前数值高低动态判定, 不再依赖端点 fib 系数或 SWAP 状态; ② 措辞从 '0.00 端点/1.00 端点' 改为 '区间上沿/区间下沿' (用户指定, 比端点名更直观); ③ '穿越' 改回 '突破' (用户指定, 配合区间沿措辞); ④ 0.49 回调消息也改用 highEdge/lowEdge (虽然 0.49 回调本身没这个问题, 但消息中显示的两个端点信息用 '上沿/下沿' 更一致); ⑤ g_breakUpFired 语义从 '突破 g_p0' 改为 '突破 highEdge', g_breakDownFired 类似。改动 6 处: CheckPullbackSignal 函数头注释 1 处 + 0.49 回调消息 1 处 (新增 highEdge/lowEdge 局部变量) + 向上穿越注释+阈值+消息 3 处 + 向下穿越注释+阈值+消息 3 处。新增 4 个临时 double (highEdge/lowEdge/range 共用, 每个 if 块内声明)"
 #property description "v2.09 SIGNAL 三类报警消息加上 _Symbol 标的品种信息: 用户要求 '所有的提醒要带有标的品种信息', 因为多 chart 跑同一 EA 时 (用户可能 EURUSD/XAUUSD 各开一个 chart 各挂一个 EA 实例), 推送无法区分是哪个品种触发的 — v2.06/v2.07/v2.08 消息前缀都是 '[FibLimitAssist]' 无品种信息, 手机端看到推送只能看推送时间推断是哪个 chart 报的, 不直观。修复: 三个 StringFormat 都在 '[FibLimitAssist]' 后加 %s 传 _Symbol, 风格与 v2.00 盈亏播报 ('[FibLimitAssist] %s P&L: ...') 保持一致。0.49 回调消息变成 '[FibLimitAssist] %s %s 价格首次回调...' (第一 %s=_Symbol, 第二 %s=dirStr=long/short); 突破上沿/下沿消息变成 '[FibLimitAssist] %s 突破区间...', 第二参数位加 pxBrk。SendNotification 去重问题: MT5 同一消息 5 秒内自动去重 (每秒最多 1 条), 三类报警的消息格式现在按品种区分 — 不同品种的同类报警不会冲突 (因为 _Symbol 不同); 同品种的同类报警仍按 fired 锁去重, 不会撞 SendNotification 去重。改动 4 处: 0.49 回调 1 行 StringFormat + 向上穿越 1 行 + 向下穿越 1 行 + 函数头注释 1 行 (v2.09 标注)。无逻辑变化, 无新增变量, 无持久化"
+#property description "v2.10 盈亏播报消息用 '盈/亏' 替代 '+/-' 符号: 用户要求 '提醒消息 改成 盈 亏 代替 + -'。原因: 推送中纯符号 '+12.50 USD' 手机端无文字语义, 看一眼分不清是盈是亏, 用中文 '盈/亏' 一目了然。修复: CheckPnLReport 中把 `(netPnl >= 0) ? '+' : ''` 改为 `(netPnl >= 0) ? '盈' : '亏'`, 同时用 MathAbs(netPnl) 取绝对值显示金额 (符号已被 '盈/亏' 取代, 不再需要双重符号)。注意: 0 视为 '盈' (与 netPnl >= 0 一致, 0 不亏)。新消息示例: '[FibLimitAssist] EURUSD P&L: 盈 12.50 USD (2 单)' / '[FibLimitAssist] XAUUSD P&L: 亏 5.20 USD (1 单)' / '[FibLimitAssist] EURUSD P&L: 盈 0.00 USD (3 单)'。改动 2 处: CheckPnLReport 中 sign 变量名改 status (语义更准, 不再是 sign) + StringFormat 参数调整 (%s%.2f → %s %.2f 加 MathAbs)。无逻辑变化, 无新增变量, 无持久化"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -1779,9 +1780,9 @@ void CheckPnLReport()
      }
    if(cnt <= 0)                   return;   // 当前 chart 品种无持仓
 
-   string sign = (netPnl >= 0) ? "+" : "";
-   string msg  = StringFormat("[FibLimitAssist] %s P&L: %s%.2f USD (%d 单)",
-                              _Symbol, sign, netPnl, cnt);
+   string status = (netPnl >= 0) ? "盈" : "亏";
+   string msg    = StringFormat("[FibLimitAssist] %s P&L: %s %.2f USD (%d 单)",
+                                _Symbol, status, MathAbs(netPnl), cnt);
    if(!SendNotification(msg))     Print("[盈亏播报] 推送未送达 (需在 MT5 工具→选项→通知 中配置 MetaQuotes ID): ", msg);
    Print("[盈亏播报] ", msg);
   }

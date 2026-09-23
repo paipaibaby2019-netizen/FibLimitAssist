@@ -4,8 +4,8 @@
 //|        交易方向 / 行情判断完全人工，EA 只负责绘图 + 按钮 + 下单     |
 //+------------------------------------------------------------------+
 #property copyright "FibLimitAssist"
-#property version   "2.10"
-#property description "半自动斐波那契限价下单辅助 (v2.10)"
+#property version   "2.11"
+#property description "半自动斐波那契限价下单辅助 (v2.11)"
 #property description "拖拽 1.00/0.00 → 0.79/0.49 挂限价单, STEP 微调, MKT/STP 市价与突破单, EVEN/CHALF/CALL 仓位管理"
 #property description "盈亏比实时标签 + ADJUST 高低点对齐 + HIDE 一键隐藏 + UI 缩放 (尺寸/字号分离) + Wine 检测修复"
 #property description "v1.45+ 新增 FVG 矩形: 看涨浅绿/看跌浅红/填补浅灰, 3 色方案; 选项含可见区扫描/高级别叠加/最小宽度"
@@ -48,6 +48,7 @@
 #property description "v2.08 SIGNAL 突破检测阈值改为 max/min(g_p1,g_p0), 措辞改为 '突破区间上沿/下沿': v2.07 修复了措辞 ('端点名' 中性化) 但没改检测阈值 — SHORT 模式下 pxBrk > g_p0 等于 '价格向上穿过下沿' 却报 '向上穿越 0.00 端点', 阈值语义仍与消息措辞矛盾。用户反馈 '描述还是有问题, 不管 long/short, 价格高的为上沿, 价格低的为下沿, 统一为突破区间上沿/下沿'。v2.08 修复: ① 检测阈值从 g_p0/g_p1 改为 highEdge=max(g_p1,g_p0)/lowEdge=min(g_p1,g_p0) — '上沿/下沿' 按当前数值高低动态判定, 不再依赖端点 fib 系数或 SWAP 状态; ② 措辞从 '0.00 端点/1.00 端点' 改为 '区间上沿/区间下沿' (用户指定, 比端点名更直观); ③ '穿越' 改回 '突破' (用户指定, 配合区间沿措辞); ④ 0.49 回调消息也改用 highEdge/lowEdge (虽然 0.49 回调本身没这个问题, 但消息中显示的两个端点信息用 '上沿/下沿' 更一致); ⑤ g_breakUpFired 语义从 '突破 g_p0' 改为 '突破 highEdge', g_breakDownFired 类似。改动 6 处: CheckPullbackSignal 函数头注释 1 处 + 0.49 回调消息 1 处 (新增 highEdge/lowEdge 局部变量) + 向上穿越注释+阈值+消息 3 处 + 向下穿越注释+阈值+消息 3 处。新增 4 个临时 double (highEdge/lowEdge/range 共用, 每个 if 块内声明)"
 #property description "v2.09 SIGNAL 三类报警消息加上 _Symbol 标的品种信息: 用户要求 '所有的提醒要带有标的品种信息', 因为多 chart 跑同一 EA 时 (用户可能 EURUSD/XAUUSD 各开一个 chart 各挂一个 EA 实例), 推送无法区分是哪个品种触发的 — v2.06/v2.07/v2.08 消息前缀都是 '[FibLimitAssist]' 无品种信息, 手机端看到推送只能看推送时间推断是哪个 chart 报的, 不直观。修复: 三个 StringFormat 都在 '[FibLimitAssist]' 后加 %s 传 _Symbol, 风格与 v2.00 盈亏播报 ('[FibLimitAssist] %s P&L: ...') 保持一致。0.49 回调消息变成 '[FibLimitAssist] %s %s 价格首次回调...' (第一 %s=_Symbol, 第二 %s=dirStr=long/short); 突破上沿/下沿消息变成 '[FibLimitAssist] %s 突破区间...', 第二参数位加 pxBrk。SendNotification 去重问题: MT5 同一消息 5 秒内自动去重 (每秒最多 1 条), 三类报警的消息格式现在按品种区分 — 不同品种的同类报警不会冲突 (因为 _Symbol 不同); 同品种的同类报警仍按 fired 锁去重, 不会撞 SendNotification 去重。改动 4 处: 0.49 回调 1 行 StringFormat + 向上穿越 1 行 + 向下穿越 1 行 + 函数头注释 1 行 (v2.09 标注)。无逻辑变化, 无新增变量, 无持久化"
 #property description "v2.10 盈亏播报消息用 '盈/亏' 替代 '+/-' 符号: 用户要求 '提醒消息 改成 盈 亏 代替 + -'。原因: 推送中纯符号 '+12.50 USD' 手机端无文字语义, 看一眼分不清是盈是亏, 用中文 '盈/亏' 一目了然。修复: CheckPnLReport 中把 `(netPnl >= 0) ? '+' : ''` 改为 `(netPnl >= 0) ? '盈' : '亏'`, 同时用 MathAbs(netPnl) 取绝对值显示金额 (符号已被 '盈/亏' 取代, 不再需要双重符号)。注意: 0 视为 '盈' (与 netPnl >= 0 一致, 0 不亏)。新消息示例: '[FibLimitAssist] EURUSD P&L: 盈 12.50 USD (2 单)' / '[FibLimitAssist] XAUUSD P&L: 亏 5.20 USD (1 单)' / '[FibLimitAssist] EURUSD P&L: 盈 0.00 USD (3 单)'。改动 2 处: CheckPnLReport 中 sign 变量名改 status (语义更准, 不再是 sign) + StringFormat 参数调整 (%s%.2f → %s %.2f 加 MathAbs)。无逻辑变化, 无新增变量, 无持久化"
+#property description "v2.11 RISK 按钮循环档位从三档扩展为四档 (新增 0.25%): 用户要求 '比例切换 增加一个0.25%'。原三档 (0.5/1/2) 循环, 新增 0.25 作为最低档 (循环顺序 0.25 → 0.5 → 1 → 2 → 0.25), 方便用户用更小仓位试探行情或长线超轻仓。修复: ① g_riskValues 数组从 [3]={0.5,1.0,2.0} 扩为 [4]={0.25,0.5,1.0,2.0}, CycleRisk 函数用 ArraySize 自动适配, 无需改循环逻辑; ② UpdateRiskButton 三档配色扩为四档: 新增 CLR_RISK_VERYLOW 浅绿 C'180,220,180' (0.25% 用), 保留原 CLR_RISK_LOW/MID/HI (0.5/1/2%) — 视觉梯度: 浅绿(0.25, 极低风险) → 绿(0.5, 低) → 黄(1, 中) → 红(2, 高); ③ UpdateRiskButton 文本格式化精度 1 → 2 (DoubleToString(d, 2)), 因为 0.25 精度 1 显示为 '0.3' 错误; 同时增加去尾 '00' 逻辑, 0.50 → '0.5', 1.00 → '1' (不出现 '0.50'/'1.00' 这种末尾补零); ④ RISK 按钮 tooltip 文字从 '0.5% → 1% → 2% → 0.5%' 改为 '0.25% → 0.5% → 1% → 2% → 0.25%'; ⑤ 注释中 '(0.5/1/2)' 全部改为 '(0.25/0.5/1/2)'; ⑥ v2.11 注释标注。CycleRisk 函数体完全不动 (ArraySize 自适应), CalcLot 函数体不动 (仍是 g_riskPercent/100, 与档位数无关)。无新增变量 (CLR_RISK_VERYLOW 是 #define), 无持久化改动"
 #property description "v1.62 EVEN/CHALF/CALL 镜像到底部下方 (y+4 与 STOP 同侧), X 分别对齐 SWAP/ADJUST/CANCEL (stepBox+8/92/176)"
 #property description "v1.63 v1.62 位置修正: EVEN/CHALF/CALL 改回 yBtn (最下面线上方) + HIDE/RISK/FVG 同步从底部移到顶部 CANCEL 右侧 (顶部 6 按钮一长链: LONG→ADJUST→CANCEL→HIDE→RISK→FVG)"
 #property description "v1.64 撤销 v1.63: 用户验证后改回原方案 — HIDE/RISK/FVG 回到底部左侧 (yBtn), EVEN/CHALF/CALL 恢复右侧 g_btnX 右对齐"
@@ -59,7 +60,7 @@
 #property description "v1.70 ADJUST 跳过已完全填补 FVG: FindMostRecentFVG_K2 在 K2 已收线后, 调 ClassifyFVGStatus 判 status; 若 status=2 (完全填补) 则 continue 试次近的, 优先选未填补/部分填补的 FVG"
 
 //---------------------------- 输入参数 -----------------------------//
-// 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.5/1/2); 0.79 挂单 v1.84 起拆两半仓 (半仓1 TP=0.19 线, 半仓2 TP=0.79→0.19 距离的2倍), 0.49 挂单=1:1, 市价=1:1
+// 注: 单笔风险(%) 由 RISK 按钮循环控制 (0.25/0.5/1/2); 0.79 挂单 v1.84 起拆两半仓 (半仓1 TP=0.19 线, 半仓2 TP=0.79→0.19 距离的2倍), 0.49 挂单=1:1, 市价=1:1
 input double InpSL_OffsetPercent = 1.0;        // 止损向外偏移占区间百分比 (%)
 input int    InpLotDecimals      = 2;          // 手数截断保留的小数位 (不四舍五入)
 input long   InpMagicNumber      = 20260903;   // 订单魔术号
@@ -135,6 +136,7 @@ input bool InpSignalAlert = false;  // [信号提醒] 启动默认开关 (默认
 // v1.25 调整：HIDE 按钮改为浅灰底（与 CANCEL 按钮同色 C'120,120,120'），仅 HIDE 态保留橙黄警示
 #define CLR_HIDE_OFF C'120,120,120'  // SHOW 状态：当前显示（浅灰，与 CANCEL 一致）
 #define CLR_HIDE_ON  C'200,120,20'   // HIDE 状态：当前隐藏（橙黄警示，仍保留）
+#define CLR_RISK_VERYLOW C'180,220,180' // RISK 0.25% 极低风险（浅绿, 比 LOW 更轻; v2.11 新增四档配色）
 #define CLR_RISK_LOW C'76,175,80'    // RISK 0.5% 低风险（绿）
 #define CLR_RISK_MID C'255,193,7'    // RISK 1%   中风险（黄）
 #define CLR_RISK_HI  C'244,67,54'    // RISK 2%   高风险（红）
@@ -185,7 +187,7 @@ int      g_btnX = 0;           // 按钮固定 X 像素位置
 
 // 单笔风险档位 (会话内持久化，MT5 重启默认 1%)
 double   g_riskPercent = 1.0;  // 当前风险档位 (%)
-double   g_riskValues[3] = {0.5, 1.0, 2.0};  // 可选档位 (循环顺序: 1 → 2 → 3 → 1 → ...)
+double   g_riskValues[4] = {0.25, 0.5, 1.0, 2.0};  // 可选档位 (循环顺序: 1 → 2 → 3 → 4 → 1 → ...; v2.11 加 0.25%)
 
 // HIDE/SHOW 状态 (会话内有效，重启后恢复显示——避免忘记 EA 被隐藏找不到)
 bool     g_hidden = false;     // true=隐藏 EA 线条与按钮(HIDE 按钮自身除外)
@@ -603,7 +605,7 @@ void CreateObjects()
    CreateActionButton(CloseAllName(),       80, "ALL",           C'120,120,120',  "平掉当前品种全部持仓（不涉及挂单），不影响其他品种");   // v1.98: 文字 "all"→"ALL" (大写)
    CreateActionButton(CloseHalfName(),      80, "HALF",          C'120,120,120',  "按手数砍半平仓当前品种持仓；若砍半后 < 最小手数则全平该仓位");   // v1.98: 文字 "half"→"HALF" (大写)
    CreateActionButton(EvenName(),           80, "EVEN",          C'120,120,120',  "一键入场价（仅当前品种）：盈利仓位SL改到入场；亏损仓位TP改到入场（保本平仓）");   // v1.96: 蓝 → 灰
-   CreateActionButton(RiskName(),           80, "",              C'90,90,90',   "点击循环切换单笔风险档位：0.5% → 1% → 2% → 0.5%");
+   CreateActionButton(RiskName(),           80, "",              C'90,90,90',   "点击循环切换单笔风险档位：0.25% → 0.5% → 1% → 2% → 0.25%");
    CreateActionButton(MarketName(),        110, "MARKET",        C'140,140,140',"市价下单（止损 = 1.00 ± Range×1%，盈亏比 1:1）");
    CreateActionButton(StopName(),          110, "STOP",          CLR_FLAT_BG,    "突破挂单: BUY STOP (long) 挂在最新已收线 K 线 High + 1 tick, SELL STOP (short) 挂在最新已收线 K 线 Low - 1 tick (v1.73 与 fib 线条解耦); SL/TP/lot 与 MARKET 共用公式");
    CreateActionButton(HideName(),           80, "HIDE",          CLR_HIDE_OFF,   "隐藏/显示 EA 全部线条与按钮（此按钮自身始终显示）");
@@ -1335,22 +1337,25 @@ void UpdateHideButton()
    ObjectSetInteger(0, name, OBJPROP_STATE, g_hidden);   // sticky：按下表示当前隐藏中
   }
 
-// 风险按钮文字 + 颜色（v1.07：循环档位 0.5 → 1 → 2 → 0.5；底色按档位变化，比例越高越醒目）
+// 风险按钮文字 + 颜色（v1.07 三档 → v2.11 四档：循环档位 0.25 → 0.5 → 1 → 2 → 0.25；底色按档位变化，比例越高越醒目）
 void UpdateRiskButton()
   {
    string name = RiskName();
    if(ObjectFind(0, name) < 0) return;
-   string s = DoubleToString(g_riskPercent, 1);
+   string s = DoubleToString(g_riskPercent, 2);   // v2.11: 精度 1 → 2 (支持 0.25 显示, 0.5/1.0/2.0 末尾 .0 由后续去尾处理)
    int dot = StringFind(s, ".");
-   if(dot >= 0 && StringSubstr(s, dot + 1) == "0")   // 去掉末尾 ".0"，如 1.0 → 1
+   if(dot >= 0 && StringSubstr(s, dot + 1) == "0")   // 去掉末尾 ".0"，如 1.0 → 1 (但 0.25 不能去掉末尾的 0, 否则变 0.2 — 实际 0.25 末尾是 "25", 不触发)
       s = StringSubstr(s, 0, dot);
+   if(dot >= 0 && StringSubstr(s, dot + 1) == "00")  // v2.11: 多去掉末尾 "00" — 如 0.50 → 0.5 (0.25 显示为 "0.25", 0.5 显示为 "0.5", 1.0 → "1", 2.0 → "2")
+      s = StringSubstr(s, 0, dot + 1) + StringSubstr(s, dot + 3);
    ObjectSetString(0, name, OBJPROP_TEXT, s + "%");
 
-   // 三档配色：低风险绿 / 中风险黄 / 高风险红
+   // 四档配色：极低风险浅绿 / 低风险绿 / 中风险黄 / 高风险红
    color bg = CLR_RISK_MID;
-   if(MathAbs(g_riskPercent - 0.5) < 1e-9) bg = CLR_RISK_LOW;
-   else if(MathAbs(g_riskPercent - 1.0) < 1e-9) bg = CLR_RISK_MID;
-   else if(MathAbs(g_riskPercent - 2.0) < 1e-9) bg = CLR_RISK_HI;
+   if(MathAbs(g_riskPercent - 0.25) < 1e-9)      bg = CLR_RISK_VERYLOW;
+   else if(MathAbs(g_riskPercent - 0.5) < 1e-9)  bg = CLR_RISK_LOW;
+   else if(MathAbs(g_riskPercent - 1.0) < 1e-9)  bg = CLR_RISK_MID;
+   else if(MathAbs(g_riskPercent - 2.0) < 1e-9)  bg = CLR_RISK_HI;
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
   }
 
@@ -2114,7 +2119,7 @@ void RefreshAll()
 
 //---------------------------- 手数计算 -----------------------------//
 // 单笔最大亏损金额 = Balance × g_riskPercent / 100
-// g_riskPercent 由 RISK 按钮循环控制 (0.5/1/2%)，会话内持久化
+// g_riskPercent 由 RISK 按钮循环控制 (0.25/0.5/1/2%)，会话内持久化
 double CalcLot(double entry, double sl)
   {
    double riskMoney = AccountInfoDouble(ACCOUNT_BALANCE) * g_riskPercent / 100.0;
@@ -3508,7 +3513,7 @@ void CycleRisk()
    g_riskPercent = g_riskValues[idx];
    SaveRisk();
    Print("[FibLimitAssist] 风险档位切换为 ", DoubleToString(g_riskPercent, 1), "%");
-   RefreshAll();   // v1.07：刷新按钮文字 + 三档配色（之前忘记调用，文字不变）
+   RefreshAll();   // v1.07：刷新按钮文字 + 配色（v2.11: 三档→四档）
   }
 
 // 切换隐藏/显示
